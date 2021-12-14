@@ -43,7 +43,7 @@ DumpXYZ::DumpXYZ(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
 
   if (format_default) delete [] format_default;
 
-  format_default = utils::strdup("%s %g %g %g");
+  format_default = utils::strdup("%s %.17e %.17e %.17e");
 
   ntypes = atom->ntypes;
   typenames = nullptr;
@@ -131,7 +131,7 @@ void DumpXYZ::write_header(bigint n)
 {
   if (me == 0) {
     fprintf(fp,BIGINT_FORMAT "\n",n);
-    fprintf(fp,"Atoms. Timestep: " BIGINT_FORMAT "\n",update->ntimestep);
+    fprintf(fp,"Atoms. Timestep: " BIGINT_FORMAT ". BL: %g %g\n",update->ntimestep,boxxlo,boxxhi);
   }
 }
 
