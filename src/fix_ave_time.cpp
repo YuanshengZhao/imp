@@ -881,7 +881,7 @@ void FixAveTime::invoke_vector(bigint ntimestep)
 
   if (fp && me == 0) {
     if (overwrite) platform::fseek(fp,filepos);
-    fprintf(fp,BIGINT_FORMAT " %d\n",ntimestep,nrows);
+    fprintf(fp,"# " BIGINT_FORMAT " %d\n",ntimestep,nrows);
     for (i = 0; i < nrows; i++) {
       fprintf(fp,"%d",i+1);
       for (j = 0; j < nvalues; j++) fprintf(fp,format,array_total[i][j]/norm);
