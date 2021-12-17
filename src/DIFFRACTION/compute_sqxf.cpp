@@ -175,7 +175,7 @@ void ComputeSQXF::init_norm()
 
   const int nlocal = atom->nlocal;
   const int ntypes = atom->ntypes;
-  const int * const mask = atom->mask;
+  // const int * const mask = atom->mask;
   const int * const type = atom->type;
   int *typecount = new int[ntypes+1];
   int *scratch = new int[ntypes+1];
@@ -185,7 +185,7 @@ void ComputeSQXF::init_norm()
     // if (mask[i] & groupbit) 
       typecount[type[ii]]++;
 
-  int natoms=0;
+  bigint natoms=0;
   MPI_Allreduce(typecount,scratch,ntypes+1,MPI_INT,MPI_SUM,world);
   for (int ii = 0; ii < ntypes; ii++) {
     typecount[ii] = scratch[ii+1];
@@ -202,6 +202,7 @@ void ComputeSQXF::init_norm()
     for(int rk=0;rk<nbin_r;rk++){
       rj=r_max*(rk+.5)/nbin_r;
       sinqr[qk][rk]=sin(qo4p*rj)*fourPiRho*rj/qo4p*dr;
+      // sinqr[qk][rk]*=sin(MY_2PI*(rk+.5)/nbin_r)/(MY_2PI*(rk+.5)/nbin_r); //Lanczos window
     }
 
     //calc X weight
