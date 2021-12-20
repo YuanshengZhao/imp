@@ -202,7 +202,7 @@ ComputeSQXD::ComputeSQXD(LAMMPS *lmp, int narg, char **arg) :
   memory->create(sinqr_all,ntypes+1,nq,"sqxd:sinqr_all");
   memory->create(cosqr_all,ntypes+1,nq,"sqxd:cosqr_all");
   memory->create(sff,n_bin,npair,"sqxd:sff");
-  memory->create(sffn,npair,"rdf:sffn");
+  memory->create(sffn,npair,"sqxd:sffn");
 
   delete[] qq;
   delete[] nq_bin_temp;

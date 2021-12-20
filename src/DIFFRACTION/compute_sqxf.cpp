@@ -50,7 +50,6 @@ ComputeSQXF::ComputeSQXF(LAMMPS *lmp, int narg, char **arg) :
 {
 
   int ntypes = atom->ntypes;
-  int natoms = group->count(igroup);
   int dimension = domain->dimension;
   int triclinic = domain->triclinic;
 
@@ -101,9 +100,9 @@ ComputeSQXF::ComputeSQXF(LAMMPS *lmp, int narg, char **arg) :
   memory->create(ggr,nbin_r,npair,"sqxf:ggr");
   memory->create(cnt,nbin_r,npair,"sqxf:cnt");
   memory->create(cnt_all,nbin_r,npair,"sqxf:cnt_all");
-  memory->create(typ2pair,ntypes+1,ntypes+1,"rdf:typ2pair");
-  memory->create(gnm,nbin_r,npair,"rdf:gnm");
-  memory->create(sffn,npair,"rdf:sffn");
+  memory->create(typ2pair,ntypes+1,ntypes+1,"sqxf:typ2pair");
+  memory->create(gnm,nbin_r,npair,"sqxf:gnm");
+  memory->create(sffn,npair,"sqxf:sffn");
 
   iarg=0;
   for (int i = 1; i <= ntypes; i++)
