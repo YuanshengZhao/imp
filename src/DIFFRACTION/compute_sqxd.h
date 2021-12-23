@@ -39,8 +39,8 @@ class ComputeSQXD : public Compute {
   int *nq_bin,*q_bin,n_bin;             // Num qs in bin, q to bin, n_bin
   double **qs,**cosqr,**sinqr,**cosqr_all,**sinqr_all;
   int nq;                // number of qs
-  double *neu_b,*sffn;         // neutron scattering length
-  double **sff;            // weight of each partial sq, normalization of gr
+  double *neu_b,*sffn,limn;         // neutron scattering length
+  double **sff,*limx;            // weight of each partial sq, high q limit
 };
 
 }    // namespace LAMMPS_NS

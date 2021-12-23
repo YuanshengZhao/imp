@@ -94,13 +94,13 @@ ComputeSQXD::ComputeSQXD(LAMMPS *lmp, int narg, char **arg) :
   int lim=utils::numeric(FLERR,arg[iarg+1],false,lmp);
   double bx=MY_2PI/(domain->xprd),by=MY_2PI/(domain->yprd),bz=MY_2PI/(domain->zprd),qx,qy,qz;
   int g_mx=(int)(q_max/bx),g_my=(int)(q_max/by),g_mz=(int)(q_max/bz),h_my,h_mz;
-  for(int ix=g_mx;ix>=0;ix--){
+  for(int ix=-g_mx;ix<=g_mx;ix++){
     qx=ix*bx;
-    h_my=ix>lim? lim : g_my;
-    for(int iy=h_my;iy>=0;iy--){
+    h_my=abs(ix)>lim? lim : g_my;
+    for(int iy=-h_my;iy<=h_my;iy++){
       qy=iy*by;
-      h_mz=(ix>lim || iy>lim)? lim : g_mz;
-      for(int iz=h_mz;iz>=0;iz--){
+      h_mz=(abs(ix)>lim || abs(iy)>lim)? lim : g_mz;
+      for(int iz=-h_mz;iz<=h_mz;iz++){
         if(ix==0 && iy==0 && iz==0) continue;
         qz=iz*bz;
         if(qx*qx+qy*qy+qz*qz<=q_max*q_max) nq++;
@@ -115,13 +115,13 @@ ComputeSQXD::ComputeSQXD(LAMMPS *lmp, int narg, char **arg) :
   double qqs,*qq=new double[nq];
   int nq_back=nq;
   nq=0;
-  for(int ix=g_mx;ix>=0;ix--){
+  for(int ix=-g_mx;ix<=g_mx;ix++){
     qx=ix*bx;
-    h_my=ix>lim? lim : g_my;
-    for(int iy=h_my;iy>=0;iy--){
+    h_my=abs(ix)>lim? lim : g_my;
+    for(int iy=-h_my;iy<=h_my;iy++){
       qy=iy*by;
-      h_mz=(ix>lim || iy>lim)? lim : g_mz;
-      for(int iz=h_mz;iz>=0;iz--){
+      h_mz=(abs(ix)>lim || abs(iy)>lim)? lim : g_mz;
+      for(int iz=-h_mz;iz<=h_mz;iz++){
         if(ix==0 && iy==0 && iz==0) continue;
         qz=iz*bz;
         qqs=qx*qx+qy*qy+qz*qz;
@@ -202,6 +202,7 @@ ComputeSQXD::ComputeSQXD(LAMMPS *lmp, int narg, char **arg) :
   memory->create(sinqr_all,ntypes+1,nq,"sqxd:sinqr_all");
   memory->create(cosqr_all,ntypes+1,nq,"sqxd:cosqr_all");
   memory->create(sff,n_bin,npair,"sqxd:sff");
+  memory->create(limx,n_bin,"sqxd:limx");
   memory->create(sffn,npair,"sqxd:sffn");
 
   delete[] qq;
@@ -223,6 +224,7 @@ ComputeSQXD::~ComputeSQXD()
   memory->destroy(neu_b);
   memory->destroy(q_bin);
   memory->destroy(nq_bin);
+  memory->destroy(limx);
   delete[] ztype;
 }
 
@@ -263,10 +265,13 @@ void ComputeSQXD::init()
       }
     }
     pair_id=0;
-    sffa=0;
+    sffa=limx[qk]=0;
     for (int ii = 0; ii < ntypes; ii++) {
-        sffa+=f[ii]*f[ii]*typecount[ii]/natoms;
+        sffa+=f[ii]*typecount[ii]/natoms;
+        limx[qk]+=f[ii]*f[ii]*typecount[ii]/natoms;
     }   
+    sffa*=sffa;
+    limx[qk]/=sffa;
     for (int ii = 0; ii < ntypes; ii++) {
       for (int jj = ii; jj < ntypes; jj++) {
         sff[qk][pair_id++]=(ii==jj? 1 : 2)*f[ii]*f[jj]/sffa;
@@ -275,10 +280,13 @@ void ComputeSQXD::init()
   }
   //calc N weight
   pair_id=0;
-  sffa=0;
+  sffa=limn=0;
   for (int ii = 0; ii < ntypes; ii++) {
-      sffa+=neu_b[ii]*neu_b[ii]*typecount[ii]/natoms;
+      sffa+=neu_b[ii]*typecount[ii]/natoms;
+      limn+=neu_b[ii]*neu_b[ii]*typecount[ii]/natoms;
   }   
+  sffa*=sffa;
+  limn/=sffa;
   for (int ii = 0; ii < ntypes; ii++) {
     for (int jj = ii; jj < ntypes; jj++) {
       sffn[pair_id++]=(ii==jj? 1 : 2)*neu_b[ii]*neu_b[jj]/sffa;
@@ -341,6 +349,7 @@ void ComputeSQXD::compute_array()
       array[qk][1]+=array[qk][pair_id]*sff[qk][pair_id-3];
       array[qk][2]+=array[qk][pair_id]*sffn[pair_id-3];
     }
+    array[qk][1]-=limx[qk];
+    array[qk][2]-=limn;
   }
-
 }
