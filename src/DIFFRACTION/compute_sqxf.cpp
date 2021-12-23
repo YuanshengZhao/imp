@@ -160,6 +160,8 @@ void ComputeSQXF::init()
   neighbor->requests[irequest]->occasional = 1;
   neighbor->requests[irequest]->cut = 1;
   neighbor->requests[irequest]->cutoff = mycutneigh;
+  neighbor->requests[irequest]->half = 1;
+  neighbor->requests[irequest]->full = 0;
 }
 
 void ComputeSQXF::init_list(int /*id*/, NeighList *ptr)
