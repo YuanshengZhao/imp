@@ -245,7 +245,7 @@ void ComputeSQXF::init_norm()
     pair_id=0;
     for (int ii = 0; ii < ntypes; ii++) {
       for (int jj = ii; jj < ntypes; jj++) {
-        gnm[rk][pair_id++]=1.0/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*qo4p;
+        gnm[rk][pair_id++]=.5/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*qo4p;
       }
     }
   }
@@ -270,6 +270,8 @@ void ComputeSQXF::compute_array()
   ilist = list->ilist;
   numneigh = list->numneigh;
   firstneigh = list->firstneigh;
+  int newton_pair = force->newton_pair;
+  int nlocal = atom->nlocal;
 
   // zero the histogram counts
 
@@ -311,7 +313,8 @@ void ComputeSQXF::compute_array()
       r = sqrt(delx*delx + dely*dely + delz*delz);
       ibin = static_cast<int> (r/ddr);
       if (ibin < nbin_r) {
-        cnt[ibin][typ2pair[itype][jtype]]++;
+        if (newton_pair || j < nlocal) cnt[ibin][typ2pair[itype][jtype]]+=2;
+        else cnt[ibin][typ2pair[itype][jtype]]++;
       }
 
     }

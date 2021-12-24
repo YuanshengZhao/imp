@@ -290,9 +290,6 @@ void PairRMDF::init_style()
   // if(comm->me==0) utils::logmesg(lmp,"call init_style\n");
   // if (atom->tag_enable == 0)
     // error->all(FLERR,"Pair style RMDF requires atom IDs");
-  if (force->newton_pair == 0)
-    error->all(FLERR,"Pair style RMDF requires newton pair on");
-
   ncall=0;
   int irequest = neighbor->request(this,instance_me);
   // neighbor->requests[irequest]->half = 0;
@@ -432,7 +429,7 @@ void PairRMDF::init_norm()
     pair_id=0;
     for (int ii = 0; ii < ntypes; ii++) {
       for (int jj = ii; jj < ntypes; jj++) {
-        gnm[rk][pair_id++]=1 /*for half neib list*/  /(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*qo4p;
+        gnm[rk][pair_id++]=.5/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*qo4p;
       }
     }
   }
@@ -458,6 +455,8 @@ void PairRMDF::compute_sq()
   ilist = list->ilist;
   numneigh = list->numneigh;
   firstneigh = list->firstneigh;
+  int newton_pair = force->newton_pair;
+  int nlocal = atom->nlocal;
 
   // zero the histogram counts
 
@@ -499,7 +498,8 @@ void PairRMDF::compute_sq()
       r = sqrt(delx*delx + dely*dely + delz*delz);
       ibin = static_cast<int> (r/ddr);
       if (ibin < nbin_r) {
-        cnt[ibin][typ2pair[itype][jtype]]++;
+        if (newton_pair || j < nlocal) cnt[ibin][typ2pair[itype][jtype]]+=2;
+        else cnt[ibin][typ2pair[itype][jtype]]++;
       }
 
     }
