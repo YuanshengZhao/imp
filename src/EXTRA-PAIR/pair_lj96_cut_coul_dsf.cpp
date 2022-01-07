@@ -272,7 +272,7 @@ void PairLJ96CutCoulDSF::coeff(int narg, char **arg)
 void PairLJ96CutCoulDSF::init_style()
 {
   if (!atom->q_flag)
-    error->all(FLERR,"Pair style lj/cut/coul/dsf requires atom attribute q");
+    error->all(FLERR,"Pair style lj96/cut/coul/dsf requires atom attribute q");
 
   neighbor->request(this,instance_me);
 
