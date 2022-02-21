@@ -13,21 +13,21 @@
 
 #ifdef PAIR_CLASS
 // clang-format off
-PairStyle(rmdf,PairRMDF);
+PairStyle(xndaf,PairXNDAF);
 // clang-format on
 #else
 
-#ifndef LMP_PAIR_RMDF_H
-#define LMP_PAIR_RMDF_H
+#ifndef LMP_PAIR_XNDAF_H
+#define LMP_PAIR_XNDAF_H
 
 #include "pair.h"
 
 namespace LAMMPS_NS {
 
-class PairRMDF : public Pair {
+class PairXNDAF : public Pair {
  public:
-  PairRMDF(class LAMMPS *);
-  virtual ~PairRMDF();
+  PairXNDAF(class LAMMPS *);
+  virtual ~PairXNDAF();
   virtual void compute(int, int);
   virtual void settings(int, char **);
   void coeff(int, char **);
@@ -40,7 +40,7 @@ class PairRMDF : public Pair {
   int npair,ntypes,ncall;
   int *ztype;           // Atomic number of the different atom types
   int **typ2pair;       //typ to pair
-  double **ggr,**ssq,**sqex;        // gr
+  double **ggr,**ssq,**iiq,**sqex;        // gr
   int **cnt,**cnt_all;        // count sum over procs
   int nbin_r,nbin_q;                // number of bins
   double r_max,q_max,ddr;
@@ -48,7 +48,7 @@ class PairRMDF : public Pair {
   double **force_qspace;
   double *neu_b,*sffn,*sffn_w;         // neutron scattering length
   double **sff,**gnm,**sff_w;            // weight of each partial sq, normalization of gr
-  double **wt;                   // weight at each point
+  double **wt,**kq,**mq,**wk;                   // weight at each point, I(Q)=kq(Q) S(Q) + mq(Q), w*k*factor
   double **frc;                   // force divded by r
   int **frc_allocated;                   // force divded by r
   double factorx,factorn;               // over factor

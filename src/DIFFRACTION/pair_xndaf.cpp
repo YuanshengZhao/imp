@@ -16,7 +16,7 @@
    Contributing author:  Yuansheng Zhao
 ------------------------------------------------------------------------- */
 
-#include "pair_rmdf.h"
+#include "pair_xndaf.h"
 #include "compute_xrd_consts.h"
 
 #include <cmath>
@@ -37,7 +37,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairRMDF::PairRMDF(LAMMPS *lmp) : Pair(lmp),
+PairXNDAF::PairXNDAF(LAMMPS *lmp) : Pair(lmp),
 nbin_r(0), nbin_q(0), npair(0)
 {
   single_enable = 0;
@@ -52,10 +52,11 @@ nbin_r(0), nbin_q(0), npair(0)
    check if allocated, since class can be destructed when incomplete
 ------------------------------------------------------------------------- */
 
-PairRMDF::~PairRMDF()
+PairXNDAF::~PairXNDAF()
 {
   if (allocated) {
     memory->destroy(ssq);
+    memory->destroy(iiq);
     memory->destroy(sinqr);
     memory->destroy(sff);
     memory->destroy(ggr);
@@ -69,6 +70,9 @@ PairRMDF::~PairRMDF()
     memory->destroy(sffn);
     memory->destroy(sqex);
     memory->destroy(wt);
+    memory->destroy(kq);
+    memory->destroy(mq);
+    memory->destroy(wk);
     memory->destroy(setflag);
     memory->destroy(cutsq);
     memory->destroy(sff_w);
@@ -83,7 +87,7 @@ PairRMDF::~PairRMDF()
 
 /* ---------------------------------------------------------------------- */
 
-void PairRMDF::compute(int eflag, int vflag)
+void PairXNDAF::compute(int eflag, int vflag)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call compute\n");
   int i, j, ii, jj, inum, jnum, itype, jtype;
@@ -102,7 +106,7 @@ void PairRMDF::compute(int eflag, int vflag)
     FILE *fp=fopen(sqout,"w");
     for(i=0;i<nbin_q;i++)
     {
-      fprintf(fp,"%lf %lf %lf",ssq[i][0],ssq[i][1],ssq[i][2]);
+      fprintf(fp,"%lf %lf %lf %lf %lf",ssq[i][0],ssq[i][1],ssq[i][2],iiq[i][0],iiq[i][1]);
       for(j=0;j<npair;j++){
         fprintf(fp," %lf",ssq[i][3+j]);
       }
@@ -193,7 +197,7 @@ void PairRMDF::compute(int eflag, int vflag)
    global settings
 ------------------------------------------------------------------------- */
 
-void PairRMDF::settings(int narg, char **/*arg*/)
+void PairXNDAF::settings(int narg, char **/*arg*/)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call settings\n");
   if (narg != 0) error->all(FLERR,"Illegal pair_style command");
@@ -203,7 +207,7 @@ void PairRMDF::settings(int narg, char **/*arg*/)
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
 // pair_coeff * * <sqex_file> <typs> <neutron_bs> nbin_r r_max nbin_q qmax factorx factorn update_interval output_interval sq_out gr_out
-void PairRMDF::coeff(int narg, char **arg)
+void PairXNDAF::coeff(int narg, char **arg)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call coeff\n");
   if (allocated) error->all(FLERR,"Cannot call a second pair_coeff");;
@@ -258,6 +262,7 @@ void PairRMDF::coeff(int narg, char **arg)
 
   npair=ntypes*(ntypes+1)/2;
   memory->create(ssq,nbin_q,3+npair,"rmdf:ssq");
+  memory->create(iiq,nbin_q,2,"rmdf:ssq");
   memory->create(sinqr,nbin_q,nbin_r,"rmdf:sinqr");
   memory->create(dsicqr_dr_div_r,nbin_q,nbin_r,"rmdf:dsinqr_dr");
   memory->create(force_qspace,npair,nbin_q,"rmdf:force_qspace");
@@ -273,6 +278,9 @@ void PairRMDF::coeff(int narg, char **arg)
   memory->create(sffn,npair,"rmdf:sffn");
   memory->create(sffn_w,npair,"rmdf:sffn_w");
   memory->create(wt,nbin_q,2,"rmdf:wt");
+  memory->create(kq,nbin_q,2,"rmdf:wt");
+  memory->create(mq,nbin_q,2,"rmdf:wt");
+  memory->create(wk,nbin_q,2,"rmdf:wt");
   memory->create(sqex,nbin_q,2,"rmdf:sqex");
   memory->create(setflag,ntypes+1,ntypes+1,"pair:setflag"); // must be set to avoid segmentation error
   memory->create(cutsq,ntypes+1,ntypes+1,"pair:cutsq");     // must be set to avoid segmentation error
@@ -292,11 +300,11 @@ void PairRMDF::coeff(int narg, char **arg)
    init specific to this pair style
 ------------------------------------------------------------------------- */
 
-void PairRMDF::init_style()
+void PairXNDAF::init_style()
 {
   // if(comm->me==0) utils::logmesg(lmp,"call init_style\n");
   // if (atom->tag_enable == 0)
-    // error->all(FLERR,"Pair style RMDF requires atom IDs");
+    // error->all(FLERR,"Pair style XNDAF requires atom IDs");
   ncall=0;
   int irequest = neighbor->request(this,instance_me);
   // neighbor->requests[irequest]->half = 0;
@@ -307,7 +315,7 @@ void PairRMDF::init_style()
    init for one type pair i,j and corresponding j,i
 ------------------------------------------------------------------------- */
 
-double PairRMDF::init_one(int i, int j)
+double PairXNDAF::init_one(int i, int j)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call init_one\n");
   if (!allocated) error->all(FLERR,"All pair coeffs are not set");
@@ -315,8 +323,8 @@ double PairRMDF::init_one(int i, int j)
 }
 
 /* ---------------------------------------------------------------------- */
-// file format : q sqx wtx sqn wtn
-void PairRMDF::read_file(char *file)
+// file format : q sqx wtx kx mx sqn wtn kn mn
+void PairXNDAF::read_file(char *file)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call read_file\n");
   // open file on proc 0
@@ -329,30 +337,56 @@ void PairRMDF::read_file(char *file)
     utils::logmesg(lmp,"Reading {} rows\n",nbin_q);
     double sumx=0,sumn=0;
     for(int i=0;i<nbin_q;i++){
-      if(fscanf(fp,"%*f %lf %lf %lf %lf\n",&sqex[i][0],&wt[i][0],&sqex[i][1],&wt[i][1]) != 4){
+      if(fscanf(fp,"%*f %lf %lf %lf %lf %lf %lf %lf %lf\n",&sqex[i][0],&wt[i][0],&kq[i][0],&mq[i][0],
+                                                           &sqex[i][1],&wt[i][1],&kq[i][1],&mq[i][1]) != 8){
         error->all(FLERR,"Error reading sqex");
         return;
       }
       sumx+=wt[i][0];
       sumn+=wt[i][1];
     }
-    sumx/=factorx;
-    sumn/=factorn;
     for(int i=0;i<nbin_q;i++){
       wt[i][0]/=sumx;
       wt[i][1]/=sumn;
+      wk[i][0]=wt[i][0]*kq[i][0]*factorx*2;
+      wk[i][1]=wt[i][1]*kq[i][1]*factorn*2;
     }
     fclose(fp);
     utils::logmesg(lmp,"Exp S(Q) final data {} {}\n",sqex[nbin_q-1][0],sqex[nbin_q-1][1]);
+    // transfer exp sq to iq and normalize
+    sumx=sumn=0;
+    for(int i=0;i<nbin_q;i++){
+      sumx+=(sqex[i][0]=sqex[i][0]*kq[i][0]+mq[i][0])*wt[i][0];
+      sumn+=(sqex[i][1]=sqex[i][1]*kq[i][1]+mq[i][1])*wt[i][1];
+    }
+    for(int i=0;i<nbin_q;i++){
+      sqex[i][0]-=sumx;
+      sqex[i][1]-=sumn;
+    }
+    sumx=sumn=0;
+    for(int i=0;i<nbin_q;i++){
+      sumx+=sqex[i][0]*sqex[i][0]*wt[i][0];
+      sumn+=sqex[i][1]*sqex[i][1]*wt[i][1];
+    }
+    sumx=sqrt(sumx);
+    sumn=sqrt(sumn);
+    for(int i=0;i<nbin_q;i++){
+      sqex[i][0]/=sumx;
+      sqex[i][1]/=sumn;
+    }
+
   }
 
   MPI_Bcast(sqex[0], 2*nbin_q, MPI_DOUBLE, 0, world);
   MPI_Bcast(wt[0], 2*nbin_q, MPI_DOUBLE, 0, world);
+  MPI_Bcast(kq[0], 2*nbin_q, MPI_DOUBLE, 0, world);
+  MPI_Bcast(mq[0], 2*nbin_q, MPI_DOUBLE, 0, world);
+  MPI_Bcast(wk[0], 2*nbin_q, MPI_DOUBLE, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void PairRMDF::init_norm()
+void PairXNDAF::init_norm()
 {
   // if(comm->me==0) utils::logmesg(lmp,"call init_norm\n");
   // count atoms of each type that are also in group
@@ -455,7 +489,7 @@ void PairRMDF::init_norm()
   if(comm->me==0) utils::logmesg(lmp,"norm generated\n");
 }
 
-void PairRMDF::compute_sq()
+void PairXNDAF::compute_sq()
 {
   // if(comm->me==0) utils::logmesg(lmp,"call compute_sq\n");
   int src,inum,jnum,i,j,ii,jj,itype,jtype,ibin;
@@ -551,7 +585,7 @@ void PairRMDF::compute_sq()
 }
 
 // lazy evaluation of force table.
-double PairRMDF::getForce(int idx_r, int idx_pair)
+double PairXNDAF::getForce(int idx_r, int idx_pair)
 {
   // if(std::isinf(frc[idx_r][idx_pair]))
   if(frc_allocated[idx_r][idx_pair]) return frc[idx_r][idx_pair];
@@ -564,7 +598,7 @@ double PairRMDF::getForce(int idx_r, int idx_pair)
   return frc[idx_r][idx_pair]=ffc;
 }
 
-void PairRMDF::generateForceTable()
+void PairXNDAF::generateForceTable()
 {
   for(int i=0;i<npair;i++){
     for(int rk=0;rk<nbin_r;rk++){
@@ -572,18 +606,43 @@ void PairRMDF::generateForceTable()
       frc_allocated[rk][i]=0;
     }
   }
-  localerg=0;
-  double temp=0,temp1=0;
+  // sq to iq and norm
+  double nrsqrx=0,nrsqrn=0,normx=0,normn=0;
+  // remove bias
+  for(int i=0;i<nbin_q;i++){
+    normx+=(iiq[i][0]=ssq[i][1]*kq[i][0]+mq[i][0])*wt[i][0];
+    normn+=(iiq[i][1]=ssq[i][2]*kq[i][1]+mq[i][1])*wt[i][1];
+  }
+  for(int i=0;i<nbin_q;i++){
+    iiq[i][0]-=normx ;
+    iiq[i][1]-=normn;
+  }
+  //calc var
+  for(int i=0;i<nbin_q;i++){
+    nrsqrx+=iiq[i][0]*iiq[i][0]*wt[i][0];
+    nrsqrn+=iiq[i][1]*iiq[i][1]*wt[i][1];
+  }
+  normx=sqrt(nrsqrx);
+  normn=sqrt(nrsqrn);
+  //inner prod
+  double crsx=0,crsn=0;
+  for(int i=0;i<nbin_q;i++){
+    crsx+=iiq[i][0]*sqex[i][0]*wt[i][0];
+    crsn+=iiq[i][1]*sqex[i][1]*wt[i][1];
+  }
+  crsx/=nrsqrx;
+  crsn/=nrsqrn;  
+
+  double diffx,diffn;
   for(int qk=0;qk<nbin_q;qk++){
-    temp =(sqex[qk][0]-ssq[qk][1])*wt[qk][0];
-    temp1=(sqex[qk][1]-ssq[qk][2])*wt[qk][1];
-    localerg+=temp*(sqex[qk][0]-ssq[qk][1])+temp1*(sqex[qk][1]-ssq[qk][2]);
+    diffx=(sqex[qk][0]-iiq[qk][0]*crsx)*wk[qk][0]/normx;
+    diffn=(sqex[qk][1]-iiq[qk][1]*crsn)*wk[qk][1]/normn;
     for(int i=0;i<npair;i++){
-      force_qspace[i][qk]=temp*sff_w[qk][i]+temp1*sffn_w[i];
+      force_qspace[i][qk]=diffx*sff_w[qk][i]+diffn*sffn_w[i];
       // for(int rk=0;rk<nbin_r;rk++){
       //   frc[rk][i]+=temp2*dsicqr_dr_div_r[qk][rk];
       // }
     }
   }
-  localerg*=(atom->nlocal/4.0);
+  localerg=((1-crsx*normx)*factorx+(1-crsn*normn)*factorn)*atom->nlocal;
 }

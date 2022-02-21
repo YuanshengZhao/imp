@@ -12,6 +12,7 @@
 *.sif
 *.dll
 *.pyc
+*.ipynb
 a.out
 __pycache__
 

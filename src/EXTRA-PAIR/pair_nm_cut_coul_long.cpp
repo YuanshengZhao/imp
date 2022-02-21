@@ -13,7 +13,7 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing Author: Julien Devemy (ICCF)
+   Contributing Author: Julien Devemy (ICCF), Yuansheng Zhao (UTokyo)
 ------------------------------------------------------------------------- */
 
 #include "pair_nm_cut_coul_long.h"
@@ -48,6 +48,7 @@ PairNMCutCoulLong::PairNMCutCoulLong(LAMMPS *lmp) : Pair(lmp)
 {
   ewaldflag = pppmflag = 1;
   ftable = nullptr;
+  cut_respa = nullptr;
   qdist = 0.0;
 }
 
@@ -65,10 +66,9 @@ PairNMCutCoulLong::~PairNMCutCoulLong()
     memory->destroy(r0);
     memory->destroy(nn);
     memory->destroy(mm);
-    memory->destroy(nm);
+    memory->destroy(fnm);
     memory->destroy(e0nm);
-    memory->destroy(r0n);
-    memory->destroy(r0m);
+    memory->destroy(r02);
     memory->destroy(offset);
   }
   if (ftable) free_tables();
@@ -159,12 +159,16 @@ void PairNMCutCoulLong::compute(int eflag, int vflag)
         } else forcecoul = 0.0;
 
         if (rsq < cut_ljsq[itype][jtype]) {
-          r = sqrt(rsq);
-          rminv = pow(r2inv,mm[itype][jtype]/2.0);
-          rninv = pow(r2inv,nn[itype][jtype]/2.0);
-          forcenm = e0nm[itype][jtype]*nm[itype][jtype] *
-            (r0n[itype][jtype]/pow(r,nn[itype][jtype]) -
-             r0m[itype][jtype]/pow(r,mm[itype][jtype]));
+          // r = sqrt(rsq);
+          // rminv = pow(r2inv,mm[itype][jtype]/2.0);
+          // rninv = pow(r2inv,nn[itype][jtype]/2.0);
+          // forcenm = e0nm[itype][jtype]*nm[itype][jtype] *
+          //   (r0n[itype][jtype]/pow(r,nn[itype][jtype]) -
+          //    r0m[itype][jtype]/pow(r,mm[itype][jtype]));
+          rminv = pow(r2inv*r02[itype][jtype],mm[itype][jtype]/2.0);
+          rninv = pow(r2inv*r02[itype][jtype],nn[itype][jtype]/2.0);
+          forcenm = fnm[itype][jtype] *
+            (rninv - rminv );
         } else forcenm = 0.0;
 
         fpair = (forcecoul + factor_lj*forcenm) * r2inv;
@@ -191,8 +195,8 @@ void PairNMCutCoulLong::compute(int eflag, int vflag)
 
           if (rsq < cut_ljsq[itype][jtype]) {
             evdwl = e0nm[itype][jtype] *
-              (mm[itype][jtype]*r0n[itype][jtype]*rninv -
-               nn[itype][jtype]*r0m[itype][jtype]*rminv) - offset[itype][jtype];
+              (mm[itype][jtype]*rninv -
+               nn[itype][jtype]*rminv) - offset[itype][jtype];
             evdwl *= factor_lj;
           } else evdwl = 0.0;
         }
@@ -228,10 +232,9 @@ void PairNMCutCoulLong::allocate()
   memory->create(r0,n+1,n+1,"pair:r0");
   memory->create(nn,n+1,n+1,"pair:nn");
   memory->create(mm,n+1,n+1,"pair:mm");
-  memory->create(nm,n+1,n+1,"pair:nm");
+  memory->create(fnm,n+1,n+1,"pair:nm");
   memory->create(e0nm,n+1,n+1,"pair:e0nm");
-  memory->create(r0n,n+1,n+1,"pair:r0n");
-  memory->create(r0m,n+1,n+1,"pair:r0m");
+  memory->create(r02,n+1,n+1,"pair:r02");
   memory->create(offset,n+1,n+1,"pair:offset");
 }
 
@@ -331,26 +334,24 @@ double PairNMCutCoulLong::init_one(int i, int j)
   double cut = MAX(cut_lj[i][j],cut_coul+2.0*qdist);
   cut_ljsq[i][j] = cut_lj[i][j] * cut_lj[i][j];
 
-  nm[i][j] = nn[i][j]*mm[i][j];
   e0nm[i][j] = e0[i][j]/(nn[i][j]-mm[i][j]);
-  r0n[i][j] = pow(r0[i][j],nn[i][j]);
-  r0m[i][j] = pow(r0[i][j],mm[i][j]);
+  fnm[i][j] = e0nm[i][j] * nn[i][j]*mm[i][j];
+  r02[i][j] = r0[i][j]*r0[i][j];
 
   if (offset_flag && (cut_lj[i][j] > 0.0)) {
     offset[i][j] = e0nm[i][j] *
-      ((mm[i][j]*r0n[i][j] / pow(cut_lj[i][j],nn[i][j])) -
-       (nn[i][j]*r0m[i][j] / pow(cut_lj[i][j],mm[i][j])));
+      ((mm[i][j]* pow(r0[i][j]/cut_lj[i][j],nn[i][j])) -
+       (nn[i][j]* pow(r0[i][j]/cut_lj[i][j],mm[i][j])));
   } else offset[i][j] = 0.0;
 
   cut_ljsq[j][i] = cut_ljsq[i][j];
   e0[j][i] = e0[i][j];
   nn[j][i] = nn[i][j];
   mm[j][i] = mm[i][j];
-  nm[j][i] = nm[i][j];
+  fnm[j][i] = fnm[i][j];
   r0[j][i] = r0[i][j];
   e0nm[j][i] = e0nm[i][j];
-  r0n[j][i] = r0n[i][j];
-  r0m[j][i] = r0m[i][j];
+  r02[j][i] = r02[i][j];
   offset[j][i] = offset[i][j];
 
   // compute I,J contribution to long-range tail correction
@@ -369,7 +370,7 @@ double PairNMCutCoulLong::init_one(int i, int j)
     MPI_Allreduce(count,all,2,MPI_DOUBLE,MPI_SUM,world);
 
     double cut_lj3 = cut_lj[i][j]*cut_lj[i][j]*cut_lj[i][j];
-    ptail_ij = 2.*MY_PI/3.*all[0]*all[1]*e0nm[i][j]*nm[i][j]*cut_lj3 *
+    ptail_ij = 2.*MY_PI/3.*all[0]*all[1]*fnm[i][j]*cut_lj3 *
       (pow(r0[i][j]/cut_lj[i][j],nn[i][j])/(nn[i][j]-3) - pow(r0[i][j]/cut_lj[i][j],mm[i][j])/(mm[i][j]-3));
     etail_ij = 2.*MY_PI*all[0]*all[1]*e0nm[i][j]*cut_lj3 *
       (mm[i][j]*pow(r0[i][j]/cut_lj[i][j],nn[i][j])/(nn[i][j]-3) - nn[i][j]*pow(r0[i][j]/cut_lj[i][j],mm[i][j])/(mm[i][j]-3));
@@ -536,9 +537,9 @@ double PairNMCutCoulLong::single(int i, int j, int itype, int jtype,
 
   if (rsq < cut_ljsq[itype][jtype]) {
     r = sqrt(rsq);
-    forcenm = e0nm[itype][jtype]*nm[itype][jtype] *
-      (r0n[itype][jtype]/pow(r,nn[itype][jtype]) -
-       r0m[itype][jtype]/pow(r,mm[itype][jtype]));
+    forcenm = fnm[itype][jtype] *
+      (pow(r02[itype][jtype]/r,nn[itype][jtype]) -
+       pow(r02[itype][jtype]/r,mm[itype][jtype]));
   } else forcenm = 0.0;
 
   fforce = (forcecoul + factor_lj*forcenm) * r2inv;
@@ -557,8 +558,8 @@ double PairNMCutCoulLong::single(int i, int j, int itype, int jtype,
 
   if (rsq < cut_ljsq[itype][jtype]) {
     phinm = e0nm[itype][jtype] *
-      (mm[itype][jtype]*r0n[itype][jtype]/pow(r,nn[itype][jtype]) -
-       nn[itype][jtype]*r0m[itype][jtype]/pow(r,mm[itype][jtype])) -
+      (mm[itype][jtype]*pow(r02[itype][jtype]/r,nn[itype][jtype]) -
+       nn[itype][jtype]*pow(r02[itype][jtype]/r,mm[itype][jtype])) -
       offset[itype][jtype];
     eng += factor_lj*phinm;
   }
