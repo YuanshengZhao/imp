@@ -159,7 +159,6 @@ void DumpXYZ::pack(tagint *ids)
     }
 }
 
-
 /* ----------------------------------------------------------------------
    convert mybuf of doubles to one big formatted string in sbuf
    return -1 if strlen exceeds an int, since used as arg in MPI calls in Dump
