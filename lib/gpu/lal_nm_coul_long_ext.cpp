@@ -27,7 +27,7 @@ static NMCoulLong<PRECISION,ACC_PRECISION> NMCLMF;
 // ---------------------------------------------------------------------------
 // Allocate memory on host and device and copy constants to device
 // ---------------------------------------------------------------------------
-int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_e0nm,
+int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_gma,
                   double **host_fnm, double **host_nn, double **host_mm,
                   double **host_r02,
                   double **offset, double *special_lj, const int inum,
@@ -58,7 +58,7 @@ int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_e0nm,
 
   int init_ok=0;
   if (world_me==0)
-    init_ok=NMCLMF.init(ntypes, cutsq, host_e0nm, host_fnm, host_nn, host_mm, host_r02,
+    init_ok=NMCLMF.init(ntypes, cutsq, host_gma, host_fnm, host_nn, host_mm, host_r02,
                         offset, special_lj, inum, nall, max_nbors, maxspecial,
                         cell_size, gpu_split, screen, host_cut_ljsq,
                         host_cut_coulsq, host_special_coul, qqrd2e, g_ewald);
@@ -77,7 +77,7 @@ int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_e0nm,
       fflush(screen);
     }
     if (gpu_rank==i && world_me!=0)
-      init_ok=NMCLMF.init(ntypes, cutsq, host_e0nm, host_fnm, host_nn, host_mm, host_r02,
+      init_ok=NMCLMF.init(ntypes, cutsq, host_gma, host_fnm, host_nn, host_mm, host_r02,
                           offset, special_lj, inum, nall, max_nbors, maxspecial,
                           cell_size, gpu_split, screen, host_cut_ljsq,
                           host_cut_coulsq, host_special_coul, qqrd2e, g_ewald);
@@ -97,7 +97,7 @@ int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_e0nm,
 // ---------------------------------------------------------------------------
 // Copy updated coeffs from host to device
 // ---------------------------------------------------------------------------
-void nmcl_gpu_reinit(const int ntypes, double **cutsq, double **host_e0nm,
+void nmcl_gpu_reinit(const int ntypes, double **cutsq, double **host_gma,
                     double **host_fnm, double **host_nn, double **host_mm,
                     double **host_r02,
                     double **offset, double **host_cut_ljsq) {
@@ -106,13 +106,13 @@ void nmcl_gpu_reinit(const int ntypes, double **cutsq, double **host_e0nm,
   int procs_per_gpu=NMCLMF.device->procs_per_gpu();
 
   if (world_me==0)
-    NMCLMF.reinit(ntypes, cutsq, host_e0nm, host_fnm, host_nn, host_mm, host_r02,
+    NMCLMF.reinit(ntypes, cutsq, host_gma, host_fnm, host_nn, host_mm, host_r02,
                   offset, host_cut_ljsq);
   NMCLMF.device->world_barrier();
 
   for (int i=0; i<procs_per_gpu; i++) {
     if (gpu_rank==i && world_me!=0)
-      NMCLMF.reinit(ntypes, cutsq, host_e0nm, host_fnm, host_nn, host_mm, host_r02,
+      NMCLMF.reinit(ntypes, cutsq, host_gma, host_fnm, host_nn, host_mm, host_r02,
                     offset, host_cut_ljsq);
     NMCLMF.device->gpu_barrier();
   }

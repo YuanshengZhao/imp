@@ -20,6 +20,9 @@ PairStyle(xndaf,PairXNDAF);
 #ifndef LMP_PAIR_XNDAF_H
 #define LMP_PAIR_XNDAF_H
 
+// #define XNDAF_DEBUG
+#define XNDAF_INSTANT_FORCE
+
 #include "pair.h"
 
 namespace LAMMPS_NS {
@@ -30,11 +33,11 @@ class PairXNDAF : public Pair {
   virtual ~PairXNDAF();
   virtual void compute(int, int);
   virtual void settings(int, char **);
-  void coeff(int, char **);
+  virtual void coeff(int, char **);
   double init_one(int, int);
   void init_style();
 
-  private:
+  protected:
 
   void read_file(char *);
   int npair,ntypes,ncall;
@@ -57,8 +60,8 @@ class PairXNDAF : public Pair {
   int update_interval,output_interval; // interval for updating sq and output
   double localerg;
   void init_norm();
-  void compute_sq();
-  void generateForceTable();
+  virtual void compute_sq();
+  virtual void generateForceTable();
   double getForce(int,int);
 };
 

@@ -190,8 +190,8 @@ void ComputeSQXF::init_norm()
   MPI_Allreduce(typecount,scratch,ntypes+1,MPI_INT,MPI_SUM,world);
   for (int ii = 0; ii < ntypes; ii++) {
     typecount[ii] = scratch[ii+1];
-    natoms+=typecount[ii];
-    if(comm->me==0) utils::logmesg(lmp,"<SQXF id:{}> N[{}] = {}\n", id,ii+1,typecount[ii]);
+    if(neu_b[ii]!=0.0) natoms+=typecount[ii];
+    if(comm->me==0) utils::logmesg(lmp,"<SQXF id:{}> N[{}] = {}\n", id,ii+1,neu_b[ii]!=0.0 ? typecount[ii] : -typecount[ii]);
   }
 
   double *f = new double[ntypes],qo4p,rj,dr=r_max/nbin_r,sffa;

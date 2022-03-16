@@ -45,7 +45,7 @@ int NMCoulLongT::bytes_per_atom(const int max_nbors) const {
 
 template <class numtyp, class acctyp>
 int NMCoulLongT::init(const int ntypes,
-                           double **host_cutsq, double **host_e0nm,
+                           double **host_cutsq, double **host_gma,
                            double **host_fnm, double **host_nn, double **host_mm,
                            double **host_r02, double **host_offset,
                            double *host_special_lj, const int nlocal,
@@ -79,7 +79,7 @@ int NMCoulLongT::init(const int ntypes,
     host_write[i]=0.0;
 
   nm1.alloc(lj_types*lj_types,*(this->ucl_device),UCL_READ_ONLY);
-  this->atom->type_pack4(ntypes,lj_types,nm1,host_write,host_e0nm,host_fnm,
+  this->atom->type_pack4(ntypes,lj_types,nm1,host_write,host_gma,host_fnm,
            host_cutsq, host_cut_ljsq);
 
   nm3.alloc(lj_types*lj_types,*(this->ucl_device),UCL_READ_ONLY);
@@ -103,7 +103,7 @@ int NMCoulLongT::init(const int ntypes,
 }
 
 template <class numtyp, class acctyp>
-void NMCoulLongT::reinit(const int ntypes, double **host_cutsq, double **host_e0nm,
+void NMCoulLongT::reinit(const int ntypes, double **host_cutsq, double **host_gma,
                            double **host_fnm, double **host_nn, double **host_mm,
                            double **host_r02,
                          double **host_offset, double **host_cut_ljsq) {
@@ -114,7 +114,7 @@ void NMCoulLongT::reinit(const int ntypes, double **host_cutsq, double **host_e0
   for (int i=0; i<_lj_types*_lj_types; i++)
     host_write[i]=0.0;
 
-  this->atom->type_pack4(ntypes,_lj_types,nm1,host_write,host_e0nm,host_fnm,
+  this->atom->type_pack4(ntypes,_lj_types,nm1,host_write,host_gma,host_fnm,
            host_cutsq, host_cut_ljsq);
   this->atom->type_pack4(ntypes,_lj_types,nm3,host_write,host_nn,host_mm,
                          host_offset, host_r02);

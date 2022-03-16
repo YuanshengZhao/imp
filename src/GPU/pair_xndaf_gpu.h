@@ -11,38 +11,40 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-/* ----------------------------------------------------------------------
-   Contributing author: Axel Kohlmeyer (Temple U)
-------------------------------------------------------------------------- */
-
 #ifdef PAIR_CLASS
 // clang-format off
-PairStyle(nm/cut/coul/long/omp,PairNMCutCoulLongOMP);
+PairStyle(xndaf/gpu,PairXNDAFGPU);
 // clang-format on
 #else
 
-#ifndef LMP_PAIR_NM_CUT_COUL_LONG_OMP_H
-#define LMP_PAIR_NM_CUT_COUL_LONG_OMP_H
+#ifndef LMP_PAIR_XNDAFGPU_H
+#define LMP_PAIR_XNDAFGPU_H
 
-#include "pair_nm_cut_coul_long.h"
-#include "thr_omp.h"
+#include "pair_xndaf_omp.h"
 
 namespace LAMMPS_NS {
 
-class PairNMCutCoulLongOMP : public PairNMCutCoulLong, public ThrOMP {
-
+class PairXNDAFGPU : public PairXNDAFOMP { // use omp version of compute sq to accelerate.
  public:
-  PairNMCutCoulLongOMP(class LAMMPS *);
-
-  virtual void compute(int, int);
-  virtual double memory_usage();
+  PairXNDAFGPU(class LAMMPS *);
+  ~PairXNDAFGPU();
+  void cpu_compute(int, int, int, int, int *, int *, int **);
+  virtual void compute(int, int) override;
+  virtual void compute_sq() override;
+  void init_style();
+  enum { GPU_FORCE, GPU_NEIGH, GPU_HYB_NEIGH };
 
  private:
-  template <int EVFLAG, int EFLAG, int NEWTON_PAIR>
-  void eval(int ifrom, int ito, ThrData *const thr);
+  void evalsq_gpu(int ifrom, int ito, ThrData *const thr, int **counter);
+  int gpu_mode;
+  double cpu_time;
 };
 
 }    // namespace LAMMPS_NS
 
 #endif
 #endif
+
+/* ERROR/WARNING messages:
+
+*/

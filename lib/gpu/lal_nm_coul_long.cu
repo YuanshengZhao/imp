@@ -104,7 +104,7 @@ __kernel void k_nm_coul_long(const __global numtyp4 *restrict x_,
           rninv = ucl_powr(r2inv*nm3[mtype].w,nm3[mtype].x/(numtyp)2.0);
           rminv = ucl_powr(r2inv*nm3[mtype].w,nm3[mtype].y/(numtyp)2.0);
           force_lj = factor_lj*nm1[mtype].y *
-            (rninv - rminv );
+            (rninv + nm1[mtype].x*rminv );
         } else
           force_lj = (numtyp)0.0;
 
@@ -130,7 +130,7 @@ __kernel void k_nm_coul_long(const __global numtyp4 *restrict x_,
           if (rsq < cut_coulsq)
             e_coul += prefactor*(_erfc-factor_coul);
           if (rsq < nm1[mtype].w) {
-            numtyp e=nm1[mtype].x*(nm3[mtype].y*rninv-nm3[mtype].x*rminv);
+            numtyp e=nm1[mtype].y/(nm3[mtype].y*nm3[mtype].x)*(nm3[mtype].y*rninv+ nm1[mtype].x*nm3[mtype].x*rminv);
             energy+=factor_lj*(e-nm3[mtype].z);
           }
         }
@@ -227,7 +227,7 @@ __kernel void k_nm_coul_long_fast(const __global numtyp4 *restrict x_,
           rninv = ucl_powr(r2inv*nm3[mtype].w,nm3[mtype].x/(numtyp)2.0);
           rminv = ucl_powr(r2inv*nm3[mtype].w,nm3[mtype].y/(numtyp)2.0);
           force_lj = factor_lj*nm1[mtype].y *
-            (rninv - rminv );
+            (rninv +nm1[mtype].x * rminv );
         } else
           force_lj = (numtyp)0.0;
 
@@ -253,7 +253,7 @@ __kernel void k_nm_coul_long_fast(const __global numtyp4 *restrict x_,
           if (rsq < cut_coulsq)
             e_coul += prefactor*(_erfc-factor_coul);
           if (rsq < nm1[mtype].w) {
-            numtyp e=nm1[mtype].x*(nm3[mtype].y*rninv-nm3[mtype].x*rminv);
+            numtyp e=nm1[mtype].y/(nm3[mtype].y*nm3[mtype].x)*(nm3[mtype].y*rninv+nm1[mtype].x *nm3[mtype].x*rminv);
             energy+=factor_lj*(e-nm3[mtype].z);
           }
         }

@@ -43,7 +43,7 @@ using namespace LAMMPS_NS;
 
 // External functions from cuda library for atom decomposition
 
-int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_e0nm,
+int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_gma,
                   double **host_fnm, double **host_nn, double **host_mm,
                   double **host_r02,
                   double **offset, double *special_lj, const int nlocal,
@@ -52,7 +52,7 @@ int nmcl_gpu_init(const int ntypes, double **cutsq, double **host_e0nm,
                   double **host_cut_ljsq, double host_cut_coulsq,
                   double *host_special_coul, const double qqrd2e,
                   const double g_ewald);
-void nmcl_gpu_reinit(const int ntypes, double **cutsq, double **host_e0nm,
+void nmcl_gpu_reinit(const int ntypes, double **cutsq, double **host_gma,
                   double **host_fnm, double **host_nn, double **host_mm,
                   double **host_r02,
                      double **offset, double **host_lj_cutsq);
@@ -188,7 +188,7 @@ void PairNMCutCoulLongGPU::init_style()
   if (atom->molecular != Atom::ATOMIC)
     maxspecial=atom->maxspecial;
   int mnf = 5e-2 * neighbor->oneatom;
-  int success = nmcl_gpu_init(atom->ntypes+1, cutsq, e0nm, fnm, nn, mm,
+  int success = nmcl_gpu_init(atom->ntypes+1, cutsq, gma, fnm, nn, mm,
                               r02, offset, force->special_lj, atom->nlocal,
                               atom->nlocal+atom->nghost, mnf, maxspecial,
                               cell_size, gpu_mode, screen, cut_ljsq, cut_coulsq,
@@ -208,7 +208,7 @@ void PairNMCutCoulLongGPU::reinit()
 {
   Pair::reinit();
 
-  nmcl_gpu_reinit(atom->ntypes+1, cutsq, e0nm, fnm, nn, mm, r02, offset, cut_ljsq);
+  nmcl_gpu_reinit(atom->ntypes+1, cutsq, gma, fnm, nn, mm, r02, offset, cut_ljsq);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -300,7 +300,7 @@ void PairNMCutCoulLongGPU::cpu_compute(int start, int inum, int eflag,
           rminv = pow(r02[itype][jtype]*r2inv,mm[itype][jtype]/2.0);
           rninv = pow(r02[itype][jtype]*r2inv,nn[itype][jtype]/2.0);
           forcelj = fnm[itype][jtype] *
-            (rninv -
+            (rninv +gma[itype][jtype]* 
              rminv);
         } else forcelj = 0.0;
 
@@ -322,9 +322,8 @@ void PairNMCutCoulLongGPU::cpu_compute(int start, int inum, int eflag,
           } else ecoul = 0.0;
 
           if (rsq < cut_ljsq[itype][jtype]) {
-            evdwl = e0nm[itype][jtype] *
-              (mm[itype][jtype]*rninv -
-               nn[itype][jtype]*rminv) - offset[itype][jtype];
+            evdwl = fnm[itype][jtype]/(nn[itype][jtype]*mm[itype][jtype]) *
+              (mm[itype][jtype]*rninv + gma[itype][jtype]*nn[itype][jtype]*rminv) - offset[itype][jtype];
             evdwl *= factor_lj;
           } else evdwl = 0.0;
         }

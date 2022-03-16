@@ -49,7 +49,7 @@ class PairNMCutCoulLong : public Pair {
   double **cut_lj, **cut_ljsq;
   double cut_coul, cut_coulsq;
   double **e0, **r0, **nn, **mm;
-  double **fnm, **e0nm, **r02, **offset;
+  double **fnm, **gma, **r02, **offset;
   double qdist;    // TIP4P distance from O site to negative charge
   double g_ewald;
   double *cut_respa;

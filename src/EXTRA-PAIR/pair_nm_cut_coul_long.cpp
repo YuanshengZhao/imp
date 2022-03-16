@@ -67,7 +67,7 @@ PairNMCutCoulLong::~PairNMCutCoulLong()
     memory->destroy(nn);
     memory->destroy(mm);
     memory->destroy(fnm);
-    memory->destroy(e0nm);
+    memory->destroy(gma);
     memory->destroy(r02);
     memory->destroy(offset);
   }
@@ -162,13 +162,13 @@ void PairNMCutCoulLong::compute(int eflag, int vflag)
           // r = sqrt(rsq);
           // rminv = pow(r2inv,mm[itype][jtype]/2.0);
           // rninv = pow(r2inv,nn[itype][jtype]/2.0);
-          // forcenm = e0nm[itype][jtype]*nm[itype][jtype] *
+          // forcenm = gma[itype][jtype]*nm[itype][jtype] *
           //   (r0n[itype][jtype]/pow(r,nn[itype][jtype]) -
           //    r0m[itype][jtype]/pow(r,mm[itype][jtype]));
           rminv = pow(r2inv*r02[itype][jtype],mm[itype][jtype]/2.0);
           rninv = pow(r2inv*r02[itype][jtype],nn[itype][jtype]/2.0);
           forcenm = fnm[itype][jtype] *
-            (rninv - rminv );
+            (rninv + gma[itype][jtype]* rminv );
         } else forcenm = 0.0;
 
         fpair = (forcecoul + factor_lj*forcenm) * r2inv;
@@ -194,8 +194,8 @@ void PairNMCutCoulLong::compute(int eflag, int vflag)
           } else ecoul = 0.0;
 
           if (rsq < cut_ljsq[itype][jtype]) {
-            evdwl = e0nm[itype][jtype] *
-              (mm[itype][jtype]*rninv -
+            evdwl = (fnm[itype][jtype]/(nn[itype][jtype]*mm[itype][jtype])) *
+              (mm[itype][jtype]*rninv + gma[itype][jtype]* 
                nn[itype][jtype]*rminv) - offset[itype][jtype];
             evdwl *= factor_lj;
           } else evdwl = 0.0;
@@ -233,7 +233,7 @@ void PairNMCutCoulLong::allocate()
   memory->create(nn,n+1,n+1,"pair:nn");
   memory->create(mm,n+1,n+1,"pair:mm");
   memory->create(fnm,n+1,n+1,"pair:nm");
-  memory->create(e0nm,n+1,n+1,"pair:e0nm");
+  memory->create(gma,n+1,n+1,"pair:gma");
   memory->create(r02,n+1,n+1,"pair:r02");
   memory->create(offset,n+1,n+1,"pair:offset");
 }
@@ -333,14 +333,17 @@ double PairNMCutCoulLong::init_one(int i, int j)
 
   double cut = MAX(cut_lj[i][j],cut_coul+2.0*qdist);
   cut_ljsq[i][j] = cut_lj[i][j] * cut_lj[i][j];
-
-  e0nm[i][j] = e0[i][j]/(nn[i][j]-mm[i][j]);
-  fnm[i][j] = e0nm[i][j] * nn[i][j]*mm[i][j];
+  /*
+  mm<0 means - (lj-like)
+  mm>0 means + (fully repulsive)
+  */
+  gma[i][j] = e0[i][j]>0.0? 1.0 : -1.0;
+  fnm[i][j] = fabs(e0[i][j])/(nn[i][j]+ gma[i][j]*mm[i][j]) * nn[i][j]*mm[i][j];
   r02[i][j] = r0[i][j]*r0[i][j];
 
   if (offset_flag && (cut_lj[i][j] > 0.0)) {
-    offset[i][j] = e0nm[i][j] *
-      ((mm[i][j]* pow(r0[i][j]/cut_lj[i][j],nn[i][j])) -
+    offset[i][j] = (fnm[i][j]/(nn[i][j]*mm[i][j])) *
+      ((mm[i][j]* pow(r0[i][j]/cut_lj[i][j],nn[i][j])) + gma[i][j]*
        (nn[i][j]* pow(r0[i][j]/cut_lj[i][j],mm[i][j])));
   } else offset[i][j] = 0.0;
 
@@ -350,7 +353,7 @@ double PairNMCutCoulLong::init_one(int i, int j)
   mm[j][i] = mm[i][j];
   fnm[j][i] = fnm[i][j];
   r0[j][i] = r0[i][j];
-  e0nm[j][i] = e0nm[i][j];
+  gma[j][i] = gma[i][j];
   r02[j][i] = r02[i][j];
   offset[j][i] = offset[i][j];
 
@@ -371,9 +374,9 @@ double PairNMCutCoulLong::init_one(int i, int j)
 
     double cut_lj3 = cut_lj[i][j]*cut_lj[i][j]*cut_lj[i][j];
     ptail_ij = 2.*MY_PI/3.*all[0]*all[1]*fnm[i][j]*cut_lj3 *
-      (pow(r0[i][j]/cut_lj[i][j],nn[i][j])/(nn[i][j]-3) - pow(r0[i][j]/cut_lj[i][j],mm[i][j])/(mm[i][j]-3));
-    etail_ij = 2.*MY_PI*all[0]*all[1]*e0nm[i][j]*cut_lj3 *
-      (mm[i][j]*pow(r0[i][j]/cut_lj[i][j],nn[i][j])/(nn[i][j]-3) - nn[i][j]*pow(r0[i][j]/cut_lj[i][j],mm[i][j])/(mm[i][j]-3));
+      (pow(r0[i][j]/cut_lj[i][j],nn[i][j])/(nn[i][j]-3) + gma[i][j]* pow(r0[i][j]/cut_lj[i][j],mm[i][j])/(mm[i][j]-3));
+    etail_ij = 2.*MY_PI*all[0]*all[1]*(fnm[i][j]/(nn[i][j]*mm[i][j]))*cut_lj3 *
+      (mm[i][j]*pow(r0[i][j]/cut_lj[i][j],nn[i][j])/(nn[i][j]-3) + gma[i][j]* nn[i][j]*pow(r0[i][j]/cut_lj[i][j],mm[i][j])/(mm[i][j]-3));
 
   }
 
@@ -538,7 +541,7 @@ double PairNMCutCoulLong::single(int i, int j, int itype, int jtype,
   if (rsq < cut_ljsq[itype][jtype]) {
     r = sqrt(rsq);
     forcenm = fnm[itype][jtype] *
-      (pow(r02[itype][jtype]/r,nn[itype][jtype]) -
+      (pow(r02[itype][jtype]/r,nn[itype][jtype]) + gma[itype][jtype]*
        pow(r02[itype][jtype]/r,mm[itype][jtype]));
   } else forcenm = 0.0;
 
@@ -557,8 +560,8 @@ double PairNMCutCoulLong::single(int i, int j, int itype, int jtype,
   }
 
   if (rsq < cut_ljsq[itype][jtype]) {
-    phinm = e0nm[itype][jtype] *
-      (mm[itype][jtype]*pow(r02[itype][jtype]/r,nn[itype][jtype]) -
+    phinm = (fnm[itype][jtype]/(nn[itype][jtype]*mm[itype][jtype])) *
+      (mm[itype][jtype]*pow(r02[itype][jtype]/r,nn[itype][jtype]) + gma[itype][jtype]*
        nn[itype][jtype]*pow(r02[itype][jtype]/r,mm[itype][jtype])) -
       offset[itype][jtype];
     eng += factor_lj*phinm;

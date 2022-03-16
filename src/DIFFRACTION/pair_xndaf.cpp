@@ -31,6 +31,10 @@
 #include "neigh_list.h"
 #include "math_const.h"
 #include "domain.h"
+#ifdef XNDAF_DEBUG
+#include <chrono>
+#include <iostream>
+#endif
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -102,7 +106,7 @@ void PairXNDAF::compute(int eflag, int vflag)
     generateForceTable();
   }
   if(comm->me==0 && ncall%output_interval==0){
-    utils::logmesg(lmp,"output sq and gr\n");
+    // utils::logmesg(lmp,"output sq and gr\n");
     FILE *fp=fopen(sqout,"w");
     for(i=0;i<nbin_q;i++)
     {
@@ -116,7 +120,7 @@ void PairXNDAF::compute(int eflag, int vflag)
     fp=fopen(grout,"w");
     for(i=0;i<nbin_r;i++)
     {
-      fprintf(fp,"%lf",(i+.5)*r_max/nbin_r);
+      fprintf(fp,"%lf",(i+.5)*ddr);
       for(j=0;j<npair;j++){
         fprintf(fp," %lf",ggr[i][j]);
       }
@@ -139,9 +143,12 @@ void PairXNDAF::compute(int eflag, int vflag)
   ilist = list->ilist;
   numneigh = list->numneigh;
   firstneigh = list->firstneigh;
+  const double cutsqall = cutsq[0][0];
 
   // loop over neighbors of my atoms
-
+  #ifdef XNDAF_DEBUG
+  auto t1=std::chrono::high_resolution_clock::now();
+  #endif
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
     xtmp = x[i][0];
@@ -163,7 +170,7 @@ void PairXNDAF::compute(int eflag, int vflag)
       rsq = delx * delx + dely * dely + delz * delz;
       jtype = type[j];
 
-      if (rsq < cutsq[itype][jtype]) {
+      if (rsq < cutsqall) {
         rsq=sqrt(rsq);
         tbi=(int)(rsq/ddr);
         if(tbi>=nbin_r) continue;
@@ -188,7 +195,11 @@ void PairXNDAF::compute(int eflag, int vflag)
       }
     }
   }
-
+  #ifdef XNDAF_DEBUG
+  auto t2=std::chrono::high_resolution_clock::now();
+  auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
+  std::cout << "total compute loop " << time_span.count() << " s\n";
+  #endif
   // if (vflag_fdotr) virial_fdotr_compute();
   eng_vdwl=localerg;
 }
@@ -292,8 +303,12 @@ void PairXNDAF::coeff(int narg, char **arg)
   read_file(arg[2]);
   init_norm();
   allocated=1;
-  for (int i = 1; i <= ntypes; i++)
-    for (int j = 1; j <= ntypes; j++) setflag[i][j] = 1;
+  for (int i = 0; i <= ntypes; i++) //cutsq[0][0] will be used. 
+    for (int j = 0; j <= ntypes; j++) 
+    {
+      cutsq[i][j]=r_max*r_max;
+      setflag[i][j] = 1;
+    }
 }
 
 /* ----------------------------------------------------------------------
@@ -406,8 +421,8 @@ void PairXNDAF::init_norm()
   MPI_Allreduce(typecount,scratch,ntypes+1,MPI_INT,MPI_SUM,world);
   for (int ii = 0; ii < ntypes; ii++) {
     typecount[ii] = scratch[ii+1];
-    natoms+=typecount[ii];
-    if(comm->me==0) utils::logmesg(lmp,"<SQXF> N[{}] = {}\n",ii+1,typecount[ii]);
+    if(neu_b[ii]!=0.0) natoms+=typecount[ii];
+    if(comm->me==0) utils::logmesg(lmp,"<SQXF> N[{}] = {}\n",ii+1,neu_b[ii]!=0.0 ? typecount[ii] : -typecount[ii]);
   }
 
   double *f = new double[ntypes],qo4p,rj,dr=r_max/nbin_r,sffa;
@@ -491,6 +506,9 @@ void PairXNDAF::init_norm()
 
 void PairXNDAF::compute_sq()
 {
+  #ifdef XNDAF_DEBUG
+  auto t1=std::chrono::high_resolution_clock::now();
+  #endif
   // if(comm->me==0) utils::logmesg(lmp,"call compute_sq\n");
   int src,inum,jnum,i,j,ii,jj,itype,jtype,ibin;
   int *ilist,*jlist,*numneigh,**firstneigh;
@@ -521,6 +539,7 @@ void PairXNDAF::compute_sq()
   double **x = atom->x;
   int *type = atom->type;
   int *mask = atom->mask;
+  const double cutsqall = cutsq[0][0];
 
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
@@ -543,11 +562,15 @@ void PairXNDAF::compute_sq()
       delx = xtmp - x[j][0];
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
-      r = sqrt(delx*delx + dely*dely + delz*delz);
-      ibin = static_cast<int> (r/ddr);
-      if (ibin < nbin_r) {
-        if (newton_pair || j < nlocal) cnt[ibin][typ2pair[itype][jtype]]+=2;
-        else cnt[ibin][typ2pair[itype][jtype]]++;
+      r = delx*delx + dely*dely + delz*delz;
+      if (r < cutsqall)
+      {
+        r=sqrt(r);
+        ibin = static_cast<int> (r/ddr);
+        if (ibin < nbin_r) {
+          if (newton_pair || j < nlocal) cnt[ibin][typ2pair[itype][jtype]]+=2;
+          else cnt[ibin][typ2pair[itype][jtype]]++;
+        }
       }
 
     }
@@ -582,11 +605,19 @@ void PairXNDAF::compute_sq()
       ssq[qk][2]+=ssq[qk][src]*sffn[gk];
     }
   }
+  #ifdef XNDAF_DEBUG
+  auto t2=std::chrono::high_resolution_clock::now();
+  auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
+  std::cout << "sq " << time_span.count() << " s\n";
+  #endif
 }
 
 // lazy evaluation of force table.
 double PairXNDAF::getForce(int idx_r, int idx_pair)
 {
+  #ifdef XNDAF_INSTANT_FORCE
+  return frc[idx_r][idx_pair];
+  #else
   // if(std::isinf(frc[idx_r][idx_pair]))
   if(frc_allocated[idx_r][idx_pair]) return frc[idx_r][idx_pair];
 
@@ -594,16 +625,27 @@ double PairXNDAF::getForce(int idx_r, int idx_pair)
   for(int qk=0;qk<nbin_q;qk++){
     ffc+=force_qspace[idx_pair][qk]*dsicqr_dr_div_r[qk][idx_r];
   }
+  frc[idx_r][idx_pair]=ffc;
   frc_allocated[idx_r][idx_pair]=1;
-  return frc[idx_r][idx_pair]=ffc;
+  return ffc;
+  // return ffc;
+  #endif
 }
 
 void PairXNDAF::generateForceTable()
-{
+{  
+  #ifdef XNDAF_DEBUG
+  auto t1=std::chrono::high_resolution_clock::now();
+  #endif
+
   for(int i=0;i<npair;i++){
     for(int rk=0;rk<nbin_r;rk++){
       // frc[rk][i]=INFINITY;
+#ifndef XNDAF_INSTANT_FORCE
       frc_allocated[rk][i]=0;
+#else
+      frc[rk][i]=0;
+#endif
     }
   }
   // sq to iq and norm
@@ -639,10 +681,19 @@ void PairXNDAF::generateForceTable()
     diffn=(sqex[qk][1]-iiq[qk][1]*crsn)*wk[qk][1]/normn;
     for(int i=0;i<npair;i++){
       force_qspace[i][qk]=diffx*sff_w[qk][i]+diffn*sffn_w[i];
-      // for(int rk=0;rk<nbin_r;rk++){
-      //   frc[rk][i]+=temp2*dsicqr_dr_div_r[qk][rk];
-      // }
+      #ifdef XNDAF_INSTANT_FORCE
+      for(int rk=0;rk<nbin_r;rk++){
+        frc[rk][i]+=force_qspace[i][qk]*dsicqr_dr_div_r[qk][rk];
+        // frc_allocated[rk][i]=1;
+      }
+      #endif
     }
   }
   localerg=((1-crsx*normx)*factorx+(1-crsn*normn)*factorn)*atom->nlocal;
+
+  #ifdef XNDAF_DEBUG
+  auto t2=std::chrono::high_resolution_clock::now();
+  auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
+  std::cout << "force table " << time_span.count() << " s\n";
+  #endif
 }
