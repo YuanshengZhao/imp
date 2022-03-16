@@ -11,40 +11,38 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#ifdef COMPUTE_CLASS
+#ifdef PAIR_CLASS
 // clang-format off
-ComputeStyle(pressure/cylinder,ComputePressureCyl);
+PairStyle(ilp/tmd,PairILPTMD);
 // clang-format on
 #else
 
-#ifndef LMP_COMPUTE_PRESSURE_CYLINDER
-#define LMP_COMPUTE_PRESSURE_CYLINDER
+#ifndef LMP_PAIR_ILP_TMD_H
+#define LMP_PAIR_ILP_TMD_H
 
-#include "compute.h"
+#include "pair_ilp_graphene_hbn.h"
 
 namespace LAMMPS_NS {
 
-class ComputePressureCyl : public Compute {
+class PairILPTMD : public PairILPGrapheneHBN {
  public:
-  ComputePressureCyl(class LAMMPS *, int, char **);
-  ~ComputePressureCyl();
-  void init();
-  void init_list(int, class NeighList *);
-  void compute_array();
-  double memory_usage();
+  PairILPTMD(class LAMMPS *);
 
- private:
-  int nbins, nphi, nzbins;
-  double *Pr_temp, *Pr_all, *Pz_temp, *Pz_all, *Pphi_temp, *Pphi_all;
-  double *R, *Rinv, *R2, *PrAinv, *PzAinv, PphiAinv;
-  double Rmax, bin_width, nktv2p;
-  double *R2kin, *density_temp, *invVbin, *density_all;
-  double *tangent, *ephi_x, *ephi_y;
-  double *binz;
+ protected:
+  void settings(int, char **) override;
+  void ILP_neigh() override;
+  void calc_normal() override;
+  void calc_FRep(int, int) override;
 
-  double zlo, zhi;
+  /**************************************************************/
+  /*       modulo operation with cycling around range           */
 
-  class NeighList *list;
+  inline int modulo(int k, int range)
+  {
+    if (k < 0) k += range;
+    return k % range;
+  }
+  /**************************************************************/
 };
 
 }    // namespace LAMMPS_NS
@@ -60,13 +58,13 @@ Self-explanatory.  Check the input script syntax and compare to the
 documentation for the command.  You can use -echo screen as a
 command-line option when running LAMMPS to see the offending line.
 
-E: No pair style is defined for compute pressure/cylinder
+E: Incorrect args for pair coefficients
 
-Self-explanatory.
+Self-explanatory.  Check the input script or data file.
 
-E: Pair style does not support compute pressure/cylinder
+E: All pair coeffs are not set
 
-The pair style does not have a single() function, so it can
-not be invoked by compute pressure/cylinder.
+All pair coefficients must be set in the data file or by the
+pair_coeff command before running a simulation.
 
 */
