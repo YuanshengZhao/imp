@@ -39,7 +39,7 @@ class PairXNDAF : public Pair {
 
   protected:
 
-  void read_file(char *);
+  virtual void read_file(char *);
   int npair,ntypes,ncall;
   int *ztype;           // Atomic number of the different atom types
   int **typ2pair;       //typ to pair

@@ -88,10 +88,12 @@ __kernel void k_xndaf(const __global numtyp4 *restrict x_,
         rsq=ucl_sqrt(rsq);
         int tbi=(int)(rsq*drinv);
         numtyp force = (numtyp)0;
-        if(tbi<n_table) force=frc_tb[tbi+tabindex[mtype]]*factor_lj;
-        f.x+=delx*force;
-        f.y+=dely*force;
-        f.z+=delz*force;
+        if(tbi<n_table) {
+          force=frc_tb[tbi+tabindex[mtype]]*factor_lj;
+          f.x+=delx*force;
+          f.y+=dely*force;
+          f.z+=delz*force;
+        }
       }
 
     } // for nbor
@@ -163,10 +165,12 @@ __kernel void k_xndaf_fast(const __global numtyp4 *restrict x_,
         rsq=ucl_sqrt(rsq);
         int tbi=(int)(rsq*drinv);
         numtyp force = (numtyp)0;
-        if(tbi<n_table) force=frc_tb[tbi+tabindex[mtype]]*factor_lj;
-        f.x+=delx*force;
-        f.y+=dely*force;
-        f.z+=delz*force;
+        if(tbi<n_table) {
+          force=frc_tb[tbi+tabindex[mtype]]*factor_lj;
+          f.x+=delx*force;
+          f.y+=dely*force;
+          f.z+=delz*force;
+        }
       }
 
     } // for nbor

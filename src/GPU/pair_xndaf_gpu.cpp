@@ -191,7 +191,7 @@ void PairXNDAFGPU::init_style()
     neighbor->requests[irequest]->half = 0;
     neighbor->requests[irequest]->full = 1;
   }
-  // else error->all(FLERR,"gpu_mode != GPU_FORCE is not supported yet!");
+  else error->all(FLERR,"gpu_mode != GPU_FORCE is not supported yet!");
 }
 
 void PairXNDAFGPU::compute_sq()
@@ -255,6 +255,7 @@ void PairXNDAFGPU::compute_sq()
   }
 
   // gr -> sq
+  const double vinv=natoms/((domain->xprd)*(domain->yprd)*(domain->zprd));
 #if defined(_OPENMP)
 #pragma omp parallel for private(src)
 #endif
@@ -264,7 +265,7 @@ void PairXNDAFGPU::compute_sq()
       src=gk+3;
       ssq[qk][src]=0;
       for(int rk=0;rk<nbin_r;rk++){
-        ssq[qk][src]+=(ggr[rk][gk]-1)*sinqr[qk][rk];
+        ssq[qk][src]+=(ggr[rk][gk]-vinv)*sinqr[qk][rk];
       }
       ssq[qk][1]+=ssq[qk][src]*sff[qk][gk];
       ssq[qk][2]+=ssq[qk][src]*sffn[gk];

@@ -185,8 +185,8 @@ void ComputeSQXF::init_norm()
   for (int ii = 0; ii < nlocal; ii++)
     // if (mask[i] & groupbit) 
       typecount[type[ii]]++;
-
-  bigint natoms=0;
+      
+  natoms=0;
   MPI_Allreduce(typecount,scratch,ntypes+1,MPI_INT,MPI_SUM,world);
   for (int ii = 0; ii < ntypes; ii++) {
     typecount[ii] = scratch[ii+1];
@@ -196,7 +196,7 @@ void ComputeSQXF::init_norm()
 
   double *f = new double[ntypes],qo4p,rj,dr=r_max/nbin_r,sffa;
   int pair_id;
-  double fourPiRho=MY_4PI*natoms/(domain->xprd)/(domain->yprd)/(domain->zprd);
+  const double fourPiRho=MY_4PI;//*natoms/(domain->xprd)/(domain->yprd)/(domain->zprd);
   for (int qk=0;qk<nbin_q;qk++){
     // calc transform MX
     array[qk][0]=qo4p=q_max*(qk+.5)/nbin_q;
@@ -239,13 +239,13 @@ void ComputeSQXF::init_norm()
       sffn[ii]/=sffa;
   }    
   //norm form gr
-  qo4p=(domain->xprd)*(domain->yprd)*(domain->zprd);
+  // qo4p=(domain->xprd)*(domain->yprd)*(domain->zprd);
   for(int rk=0;rk<nbin_r;rk++){
     rj=(pow(r_max*(rk+1)/nbin_r,3)-pow(r_max*(rk)/nbin_r,3))/3;
     pair_id=0;
     for (int ii = 0; ii < ntypes; ii++) {
       for (int jj = ii; jj < ntypes; jj++) {
-        gnm[rk][pair_id++]=.5/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*qo4p;
+        gnm[rk][pair_id++]=.5/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*natoms;//*qo4p;
       }
     }
   }
@@ -337,13 +337,14 @@ void ComputeSQXF::compute_array()
   }
 
   // gr -> sq
+  const double vinv=natoms/((domain->xprd)*(domain->yprd)*(domain->zprd));
   for(int qk=0;qk<nbin_q;qk++){
     array[qk][1]=array[qk][2]=0;
     for (int gk=0;gk<npair;gk++){
       src=gk+3;
       array[qk][src]=0;
       for(int rk=0;rk<nbin_r;rk++){
-        array[qk][src]+=(ggr[rk][gk]-1)*sinqr[qk][rk];
+        array[qk][src]+=(ggr[rk][gk]-vinv)*sinqr[qk][rk];
       }
       array[qk][1]+=array[qk][src]*sff[qk][gk];
       array[qk][2]+=array[qk][src]*sffn[gk];

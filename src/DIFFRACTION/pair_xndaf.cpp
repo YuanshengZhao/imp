@@ -256,15 +256,15 @@ void PairXNDAF::coeff(int narg, char **arg)
     neu_b[i]=utils::numeric(FLERR,arg[iarg++],false,lmp);
     if(comm->me==0) utils::logmesg(lmp,"<SQXF> neutron_b[{}] = {}\n",i+1,neu_b[i]);
   }
-  nbin_r = utils::numeric(FLERR,arg[iarg],false,lmp);
+  nbin_r = utils::inumeric(FLERR,arg[iarg],false,lmp);
   r_max = utils::numeric(FLERR,arg[iarg+1],false,lmp);
-  nbin_q = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+  nbin_q = utils::inumeric(FLERR,arg[iarg+2],false,lmp);
   q_max = utils::numeric(FLERR,arg[iarg+3],false,lmp);
   ddr=r_max/nbin_r;
   factorx = utils::numeric(FLERR,arg[iarg+4],false,lmp);
   factorn = utils::numeric(FLERR,arg[iarg+5],false,lmp);
-  update_interval=utils::numeric(FLERR,arg[iarg+6],false,lmp);
-  output_interval=utils::numeric(FLERR,arg[iarg+7],false,lmp);
+  update_interval=utils::inumeric(FLERR,arg[iarg+6],false,lmp);
+  output_interval=utils::inumeric(FLERR,arg[iarg+7],false,lmp);
 
   sqout=new char [ 1+strlen(arg[iarg+8])];
   sprintf(sqout,"%s",arg[iarg+8]);
@@ -273,7 +273,7 @@ void PairXNDAF::coeff(int narg, char **arg)
 
   npair=ntypes*(ntypes+1)/2;
   memory->create(ssq,nbin_q,3+npair,"rmdf:ssq");
-  memory->create(iiq,nbin_q,2,"rmdf:ssq");
+  memory->create(iiq,nbin_q,2,"rmdf:iiq");
   memory->create(sinqr,nbin_q,nbin_r,"rmdf:sinqr");
   memory->create(dsicqr_dr_div_r,nbin_q,nbin_r,"rmdf:dsinqr_dr");
   memory->create(force_qspace,npair,nbin_q,"rmdf:force_qspace");
@@ -289,9 +289,9 @@ void PairXNDAF::coeff(int narg, char **arg)
   memory->create(sffn,npair,"rmdf:sffn");
   memory->create(sffn_w,npair,"rmdf:sffn_w");
   memory->create(wt,nbin_q,2,"rmdf:wt");
-  memory->create(kq,nbin_q,2,"rmdf:wt");
-  memory->create(mq,nbin_q,2,"rmdf:wt");
-  memory->create(wk,nbin_q,2,"rmdf:wt");
+  memory->create(kq,nbin_q,2,"rmdf:kq");
+  memory->create(mq,nbin_q,2,"rmdf:mq");
+  memory->create(wk,nbin_q,2,"rmdf:wk");
   memory->create(sqex,nbin_q,2,"rmdf:sqex");
   memory->create(setflag,ntypes+1,ntypes+1,"pair:setflag"); // must be set to avoid segmentation error
   memory->create(cutsq,ntypes+1,ntypes+1,"pair:cutsq");     // must be set to avoid segmentation error
@@ -427,7 +427,7 @@ void PairXNDAF::init_norm()
 
   double *f = new double[ntypes],qo4p,rj,dr=r_max/nbin_r,sffa;
   int pair_id;
-  double fourPiRho=MY_4PI*natoms/(domain->xprd)/(domain->yprd)/(domain->zprd);
+  const double fourPiRho=MY_4PI;//*natoms/(domain->xprd)/(domain->yprd)/(domain->zprd);
   for (int qk=0;qk<nbin_q;qk++){
     // calc transform MX
     ssq[qk][0]=qo4p=q_max*(qk+.5)/nbin_q;
@@ -486,13 +486,13 @@ void PairXNDAF::init_norm()
   }
   // if(comm->me==0) utils::logmesg(lmp,"sffn finished\n");
   //norm form gr
-  qo4p=(domain->xprd)*(domain->yprd)*(domain->zprd);
+  // qo4p=(domain->xprd)*(domain->yprd)*(domain->zprd);
   for(int rk=0;rk<nbin_r;rk++){
     rj=(pow(r_max*(rk+1)/nbin_r,3)-pow(r_max*(rk)/nbin_r,3))/3;
     pair_id=0;
     for (int ii = 0; ii < ntypes; ii++) {
       for (int jj = ii; jj < ntypes; jj++) {
-        gnm[rk][pair_id++]=.5/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*qo4p;
+        gnm[rk][pair_id++]=.5/(rj)*2/(MY_4PI)/(typecount[ii]*(ii==jj? (typecount[jj]-1) : 2*typecount[jj]))*natoms;//*qo4p;
       }
     }
   }
@@ -569,7 +569,7 @@ void PairXNDAF::compute_sq()
         ibin = static_cast<int> (r/ddr);
         if (ibin < nbin_r) {
           if (newton_pair || j < nlocal) cnt[ibin][typ2pair[itype][jtype]]+=2;
-          else cnt[ibin][typ2pair[itype][jtype]]++;
+          else ++cnt[ibin][typ2pair[itype][jtype]];
         }
       }
 
@@ -593,13 +593,14 @@ void PairXNDAF::compute_sq()
   }
 
   // gr -> sq
+  const double vinv=natoms/((domain->xprd)*(domain->yprd)*(domain->zprd));
   for(int qk=0;qk<nbin_q;qk++){
     ssq[qk][1]=ssq[qk][2]=0;
     for (int gk=0;gk<npair;gk++){
       src=gk+3;
       ssq[qk][src]=0;
       for(int rk=0;rk<nbin_r;rk++){
-        ssq[qk][src]+=(ggr[rk][gk]-1)*sinqr[qk][rk];
+        ssq[qk][src]+=(ggr[rk][gk]-vinv)*sinqr[qk][rk];
       }
       ssq[qk][1]+=ssq[qk][src]*sff[qk][gk];
       ssq[qk][2]+=ssq[qk][src]*sffn[gk];
