@@ -31,7 +31,7 @@ class PairFMIRLGPU : public PairFMIRL {
   void cpu_compute(int, int, int, int, int *, int *, int **);
   virtual void compute(int, int) override;
   virtual void compute_gr() override;
-  void init_style();
+  void init_style() override;
   enum { GPU_FORCE, GPU_NEIGH, GPU_HYB_NEIGH };
 
  private:

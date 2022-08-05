@@ -37,7 +37,7 @@ using namespace MathConst;
 /* ---------------------------------------------------------------------- */
 
 PairFMIRL::PairFMIRL(LAMMPS *lmp) : Pair(lmp),
-nbin_r(0), npair(0), nfea(0), ncall(0), beta1t(1.0), beta2t(1.0), use_base(0)
+nbin_r(0), npair(0), nfea(0), ncall(0), use_base(0)
 {
   single_enable = 0;
   restartinfo = 0;
@@ -69,13 +69,13 @@ PairFMIRL::~PairFMIRL()
     memory->destroy(fea_true);
     memory->destroy(grad);
     memory->destroy(mon1);
-    memory->destroy(mon2);
     memory->destroy(rr);
     memory->destroy(cnt);
     memory->destroy(cnt_all);
     if(use_base) memory->destroy(base);
     delete[] feout;
     delete[] grout;
+    delete[] binout;
   }
 }
 
@@ -191,7 +191,7 @@ void PairFMIRL::settings(int narg, char **/*arg*/)
 /* ----------------------------------------------------------------------
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
-// pair_coeff * * data_file init_file base learing_rate adam_epsilon update_interval output_interval fe_out gr_out
+// pair_coeff * * data_file init_file base learing_rate momentum update_interval output_interval fe_out gr_out
 void PairFMIRL::coeff(int narg, char **arg)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call coeff\n");
@@ -216,7 +216,8 @@ void PairFMIRL::coeff(int narg, char **arg)
     else utils::logmesg(lmp,"use_base = F\n");
   }
   lr=utils::numeric(FLERR,arg[5],false,lmp);
-  epsilon=utils::numeric(FLERR,arg[6],false,lmp);
+  momentum=utils::numeric(FLERR,arg[6],false,lmp);
+  co_momentum=1-momentum;
   update_interval=utils::inumeric(FLERR,arg[7],false,lmp);
   output_interval=utils::inumeric(FLERR,arg[8],false,lmp);
 
@@ -316,7 +317,6 @@ void PairFMIRL::read_file(char *file, char *file_i)
   memory->create(fea_true,nfea,"fmirl:fea_true");
   memory->create(grad,nfea,"fmirl:grad");
   memory->create(mon1,nfea,"fmirl:mon1");
-  memory->create(mon2,nfea,"fmirl:mon2");
   memory->create(rr,nbin_r,"fmirl:rr");
   memory->create(cnt,npair,nbin_r,"fmirl:gnm");
   memory->create(cnt_all,npair,nbin_r,"fmirl:gnm");
@@ -327,7 +327,7 @@ void PairFMIRL::read_file(char *file, char *file_i)
     rr[i]=r_max*(i+.5)/nbin_r;
 
   for(int i=0;i<nfea;++i)
-    mon1[i]=mon2[i]=0;
+    mon1[i]=0;
   if (comm->me == 0) {
     for(int p=0;p<npair;++p)
       if(fread(u0[p],sizeof(double),nbin_r,fp)!=nbin_r){ error->all(FLERR,"Error reading u0"); return; }
@@ -515,13 +515,10 @@ void PairFMIRL::compute_gr()
 
 void PairFMIRL::generateForceTable()
 {  
-  beta1t*=.9;
-  beta2t*=.999;
   for(int fk=0;fk<nfea;++fk){
     grad[fk]=fea[fk]-fea_true[fk]-l2[fk]*f_coef[fk];
-    mon1[fk]=mon1[fk]*.9+grad[fk]*.1;
-    mon2[fk]=mon2[fk]*.999+grad[fk]*grad[fk]*.001;
-    f_coef[fk]+=lr*mon1[fk]/(1-beta1t)/(epsilon+sqrt(mon2[fk]/(1-beta2t)));
+    mon1[fk]=mon1[fk]*momentum+grad[fk]*co_momentum;
+    f_coef[fk]+=lr*mon1[fk];
   }
   for(int i=0;i<npair;++i){
     for(int rk=0;rk<nbin_r;++rk){

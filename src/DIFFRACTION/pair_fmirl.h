@@ -44,13 +44,12 @@ class PairFMIRL : public Pair {
   double **u0,**f0_dr,**uf,**ff_dr;
   double ***ufi,***ffi_dr;
   double *fea,*f_coef,*l2,*fea_true;
-  double *grad,*mon1,*mon2; 
+  double *grad,*mon1; 
   double lr;
-  double beta1t,beta2t;
   int update_interval,output_interval;
   bigint ncall;
   int **typ2pair;
-  double epsilon;
+  double momentum,co_momentum;
   int **cnt,**cnt_all;
   int use_base;
   double *base;

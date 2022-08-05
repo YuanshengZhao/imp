@@ -31,7 +31,7 @@ class PairXNDAFGPU : public PairXNDAFOMP { // use omp version of compute sq to a
   void cpu_compute(int, int, int, int, int *, int *, int **);
   virtual void compute(int, int) override;
   virtual void compute_sq() override;
-  void init_style();
+  void init_style() override;
   enum { GPU_FORCE, GPU_NEIGH, GPU_HYB_NEIGH };
 
  private:
