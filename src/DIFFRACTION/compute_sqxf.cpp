@@ -34,6 +34,7 @@
 #include "neigh_list.h"
 #include "force.h"
 #include "pair.h"
+#include <iostream>
 
 #include <cmath>
 #include <cstring>
@@ -166,6 +167,8 @@ void ComputeSQXF::init()
 
 void ComputeSQXF::init_list(int /*id*/, NeighList *ptr)
 {
+  // std::cout<<"compute list is"<<ptr<<std::endl;
+  // std::cout<<"modify is"<<modify<<std::endl;
   list = ptr;
 }
 
@@ -258,6 +261,7 @@ void ComputeSQXF::init_norm()
 // output array: q sqX sqN partial_sqs
 void ComputeSQXF::compute_array()
 {
+  // printf("compute_array");
   invoked_array = update->ntimestep;
   int src,inum,jnum,i,j,ii,jj,itype,jtype,ibin;
   int *ilist,*jlist,*numneigh,**firstneigh;

@@ -91,7 +91,7 @@ void PairFMIRLGPU::compute(int eflag, int vflag)
   }
   if(comm->me==0 && ncall%output_interval==0 && ncall>=output_interval){
     // utils::logmesg(lmp,"output sq and gr\n");
-    FILE *fp=fopen(feout,"a+");
+    FILE *fp=fopen(feout,"w");
     for(i=0;i<nfea;i++)
       fprintf(fp,"%lf %lf %lf\n",fea[i],f_coef[i],grad[i]);
     fclose(fp);
@@ -157,13 +157,13 @@ void PairFMIRLGPU::init_style()
   ncall=0;
   // Repeat cutsq calculation because done after call to init_style
   if (!allocated) error->all(FLERR,"All pair coeffs are not set");
-  double cell_size = r_max + neighbor->skin;
+  double cell_size = force_cutoff + neighbor->skin;
 
   int maxspecial=0;
   if (atom->molecular != Atom::ATOMIC)
     maxspecial=atom->maxspecial;
   int mnf = 5e-2 * neighbor->oneatom;
-  int success = fmirl_gpu_init(atom->ntypes+1, nbin_r, r_max*r_max, ddr,
+  int success = fmirl_gpu_init(atom->ntypes+1, nbin_r, force_cutoff_sq, ddr,
                              force->special_lj, atom->nlocal,
                              atom->nlocal+atom->nghost, mnf, maxspecial,
                              cell_size, gpu_mode, screen);
@@ -281,7 +281,7 @@ void PairFMIRLGPU::cpu_compute(int start, int inum, int eflag, int /* vflag */,
   double *special_lj = force->special_lj;
 
   // loop over neighbors of my atoms
-  const double cutsqall = cutsq[0][0];
+  const double cutsqall = force_cutoff_sq;// cutsq[0][0];
   for (ii = start; ii < inum; ii++) {
     i = ilist[ii];
     xtmp = x[i][0];

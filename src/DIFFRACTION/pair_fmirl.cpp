@@ -96,7 +96,7 @@ void PairFMIRL::compute(int eflag, int vflag)
   }
   if(comm->me==0 && ncall%output_interval==0 && ncall>=output_interval){
     // utils::logmesg(lmp,"output sq and gr\n");
-    FILE *fp=fopen(feout,"a+");
+    FILE *fp=fopen(feout,"w");
     for(i=0;i<nfea;i++)
       fprintf(fp,"%lf %lf %lf\n",fea[i],f_coef[i],grad[i]);
     fclose(fp);
@@ -129,7 +129,7 @@ void PairFMIRL::compute(int eflag, int vflag)
   ilist = list->ilist;
   numneigh = list->numneigh;
   firstneigh = list->firstneigh;
-  const double cutsqall = cutsq[0][0];
+  const double cutsqall = force_cutoff_sq; //cutsq[0][0];
 
   // loop over neighbors of my atoms
   for (ii = 0; ii < inum; ii++) {
@@ -191,7 +191,7 @@ void PairFMIRL::settings(int narg, char **/*arg*/)
 /* ----------------------------------------------------------------------
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
-// pair_coeff * * data_file init_file base learing_rate momentum update_interval output_interval fe_out gr_out
+// pair_coeff * * data_file init_file force_cutoff base learning_rate momentum update_interval output_interval fe_out gr_out
 void PairFMIRL::coeff(int narg, char **arg)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call coeff\n");
@@ -204,27 +204,29 @@ void PairFMIRL::coeff(int narg, char **arg)
   // Checking errors
   if (dimension == 2)
      error->all(FLERR,"FMIRL does not work with 2d structures");
-  if (narg != 11)
+  if (narg != 12)
      error->all(FLERR,"Illegal FMIRL Command");
   if (triclinic == 1)
      error->all(FLERR,"FMIRL does not work with triclinic structures");
 
-  use_base=utils::inumeric(FLERR,arg[4],false,lmp);
+  use_base=utils::inumeric(FLERR,arg[5],false,lmp);
   if(comm->me==0)
   {
     if(use_base) utils::logmesg(lmp,"use_base = T\n");
     else utils::logmesg(lmp,"use_base = F\n");
   }
-  lr=utils::numeric(FLERR,arg[5],false,lmp);
-  momentum=utils::numeric(FLERR,arg[6],false,lmp);
+  force_cutoff=utils::numeric(FLERR,arg[4],false,lmp);
+  force_cutoff_sq=force_cutoff*force_cutoff;
+  lr=utils::numeric(FLERR,arg[6],false,lmp);
+  momentum=utils::numeric(FLERR,arg[7],false,lmp);
   co_momentum=1-momentum;
-  update_interval=utils::inumeric(FLERR,arg[7],false,lmp);
-  output_interval=utils::inumeric(FLERR,arg[8],false,lmp);
+  update_interval=utils::inumeric(FLERR,arg[8],false,lmp);
+  output_interval=utils::inumeric(FLERR,arg[9],false,lmp);
 
-  feout=new char [ 1+strlen(arg[9])];
-  sprintf(feout,"%s",arg[9]);
-  grout=new char [ 1+strlen(arg[10])];
-  sprintf(grout,"%s",arg[10]);
+  feout=new char [ 1+strlen(arg[10])];
+  sprintf(feout,"%s",arg[10]);
+  grout=new char [ 1+strlen(arg[11])];
+  sprintf(grout,"%s",arg[11]);
   binout=new char [ 1+strlen(arg[3])];
   sprintf(binout,"%s",arg[3]);
 
@@ -240,10 +242,11 @@ void PairFMIRL::coeff(int narg, char **arg)
   read_file(arg[2],arg[3]);
   init_norm();
   allocated=1;
+  double csq=lr>0? r_max*r_max : force_cutoff_sq;
   for (int i = 0; i <= ntypes; i++) //cutsq[0][0] will be used. 
     for (int j = 0; j <= ntypes; j++) 
     {
-      cutsq[i][j]=r_max*r_max;
+      cutsq[i][j]=csq;
       setflag[i][j] = 1;
     }
 }
@@ -271,7 +274,7 @@ double PairFMIRL::init_one(int i, int j)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call init_one\n");
   if (!allocated) error->all(FLERR,"All pair coeffs are not set");
-  return r_max;
+  return lr>0? r_max : force_cutoff;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -290,6 +293,8 @@ void PairFMIRL::read_file(char *file, char *file_i)
 
     if(fread(&r_max,sizeof(double),1,fp)!=1){ error->all(FLERR,"Error reading r_max"); return; }
     else {utils::logmesg(lmp,"r_max = {}\n",r_max);}
+
+    if(r_max<force_cutoff){ error->all(FLERR,"Error: r_max < force_cutoff"); return; }
 
     if(fread(&nbin_r,sizeof(int),1,fp)!=1){ error->all(FLERR,"Error reading nbin_r"); return; }
     else {utils::logmesg(lmp,"nbin_r = {}\n",nbin_r);}

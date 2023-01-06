@@ -133,7 +133,7 @@ void PairXNDAFOMP::eval(int iifrom, int iito, ThrData * const thr)
 
   // loop over neighbors of my atoms
 
-  const double cutsqall = cutsq[0][0];
+  const double cutsqall = force_cutoff_sq;// cutsq[0][0];
   for (int ii = iifrom; ii < iito; ++ii) {
     const int i = ilist[ii];
     const int itype = type[i];

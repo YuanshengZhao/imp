@@ -12,7 +12,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "dump_xyz.h"
+#include "dump_xyzb.h"
 
 #include "atom.h"
 #include "error.h"
@@ -28,11 +28,11 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-DumpXYZ::DumpXYZ(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
+DumpXYZB::DumpXYZB(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
   typenames(nullptr)
 {
   if (narg != 5) error->all(FLERR,"Illegal dump xyz command");
-  if (binary || multiproc) error->all(FLERR,"Invalid dump xyz filename");
+  if (multiproc) error->all(FLERR,"Invalid dump xyz filename");
 
   size_one = 5;
 
@@ -40,6 +40,7 @@ DumpXYZ::DumpXYZ(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
   buffer_flag = 1;
   sort_flag = 1;
   sortcol = 0;
+  binary = 0;
 
   if (format_default) delete [] format_default;
 
@@ -51,7 +52,7 @@ DumpXYZ::DumpXYZ(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
 
 /* ---------------------------------------------------------------------- */
 
-DumpXYZ::~DumpXYZ()
+DumpXYZB::~DumpXYZB()
 {
   delete[] format_default;
   format_default = nullptr;
@@ -66,7 +67,7 @@ DumpXYZ::~DumpXYZ()
 
 /* ---------------------------------------------------------------------- */
 
-void DumpXYZ::init_style()
+void DumpXYZB::init_style()
 {
   // format = copy of default or user-specified line format
 
@@ -90,8 +91,8 @@ void DumpXYZ::init_style()
 
   // setup function ptr
 
-  if (buffer_flag == 1) write_choice = &DumpXYZ::write_string;
-  else write_choice = &DumpXYZ::write_lines;
+  if (buffer_flag == 1) write_choice = &DumpXYZB::write_string;
+  else write_choice = &DumpXYZB::write_lines;
 
   // open single file, one time only
 
@@ -100,7 +101,7 @@ void DumpXYZ::init_style()
 
 /* ---------------------------------------------------------------------- */
 
-int DumpXYZ::modify_param(int narg, char **arg)
+int DumpXYZB::modify_param(int narg, char **arg)
 {
   if (strcmp(arg[0],"element") == 0) {
     if (narg < ntypes+1)
@@ -127,17 +128,19 @@ int DumpXYZ::modify_param(int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
-void DumpXYZ::write_header(bigint n)
+void DumpXYZB::write_header(bigint n)
 {
   if (me == 0) {
-    fprintf(fp,BIGINT_FORMAT "\n",n);
-    fprintf(fp,"Atoms. Timestep: " BIGINT_FORMAT ". BL: %.17e %.17e %.17e %.17e %.17e %.17e\n",update->ntimestep,boxxlo,boxxhi,boxylo,boxyhi,boxzlo,boxzhi);
+    // fprintf(fp,BIGINT_FORMAT "\n",n);
+    // fprintf(fp,"Atoms. Timestep: " BIGINT_FORMAT ". BL: %.17e %.17e %.17e %.17e %.17e %.17e\n",update->ntimestep,boxxlo,boxxhi,boxylo,boxyhi,boxzlo,boxzhi);
+    double nt=n;
+    fwrite(&nt,sizeof(double),1,fp);
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-void DumpXYZ::pack(tagint *ids)
+void DumpXYZB::pack(tagint *ids)
 {
   int m,n;
 
@@ -164,9 +167,9 @@ void DumpXYZ::pack(tagint *ids)
    return -1 if strlen exceeds an int, since used as arg in MPI calls in Dump
 ------------------------------------------------------------------------- */
 
-int DumpXYZ::convert_string(int n, double *mybuf)
+int DumpXYZB::convert_string(int n, double *mybuf)
 {
-  // printf("DumpXYZ::convert_string %d %p\n",n,mybuf);
+  // printf("DumpXYZB::convert_string %d %p\n",n,mybuf);
   int offset = 0;
   int m = 0;
   for (int i = 0; i < n; i++) {
@@ -175,10 +178,11 @@ int DumpXYZ::convert_string(int n, double *mybuf)
       maxsbuf += DELTA;
       memory->grow(sbuf,maxsbuf,"dump:sbuf");
     }
-
-    offset += sprintf(&sbuf[offset],format,
-                      typenames[static_cast<int> (mybuf[m+1])],
-                      mybuf[m+2],mybuf[m+3],mybuf[m+4]);
+    memcpy(sbuf+offset,mybuf+(m+2),3*sizeof(double));
+    offset+=3*sizeof(double);
+    // offset += sprintf(&sbuf[offset],format,
+    //                   typenames[static_cast<int> (mybuf[m+1])],
+    //                   mybuf[m+2],mybuf[m+3],mybuf[m+4]);
     m += size_one;
   }
 
@@ -187,31 +191,32 @@ int DumpXYZ::convert_string(int n, double *mybuf)
 
 /* ---------------------------------------------------------------------- */
 
-void DumpXYZ::write_data(int n, double *mybuf)
+void DumpXYZB::write_data(int n, double *mybuf)
 {
-  // printf("DumpXYZ::write_data %d %p\n",n,mybuf);
+  // printf("DumpXYZB::write_data %d %p\n",n,mybuf);
   (this->*write_choice)(n,mybuf);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void DumpXYZ::write_string(int n, double *mybuf)
+void DumpXYZB::write_string(int n, double *mybuf)
 {
-  // printf("DumpXYZ::write_string %d %p\n",n,mybuf);
+  // printf("DumpXYZB::write_string %d %p\n",n,mybuf);
   if (mybuf)
     fwrite(mybuf,sizeof(char),n,fp);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void DumpXYZ::write_lines(int n, double *mybuf)
+void DumpXYZB::write_lines(int n, double *mybuf)
 {
-  // printf("DumpXYZ::write_lines %d %p\n",n,mybuf);
+  // printf("DumpXYZB::write_lines %d %p\n",n,mybuf);
   int m = 0;
   for (int i = 0; i < n; i++) {
-    fprintf(fp,format,
-            typenames[static_cast<int> (mybuf[m+1])],
-            mybuf[m+2],mybuf[m+3],mybuf[m+4]);
+    // fprintf(fp,format,
+    //         typenames[static_cast<int> (mybuf[m+1])],
+    //         mybuf[m+2],mybuf[m+3],mybuf[m+4]);
+    fwrite(mybuf+(m+2),sizeof(double),3,fp);
     m += size_one;
   }
 }

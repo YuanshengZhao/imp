@@ -13,230 +13,60 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author:  Yuansheng Zhao
+   Contributing authors: Shawn Coleman & Douglas Spearot (Arkansas)
+   Updated: 06/17/2015-2
 ------------------------------------------------------------------------- */
 
-#include "pair_xndaf.h"
+#include "compute_xndaf_rmd_force.h"
 #include "compute_xrd_consts.h"
 
-#include <cmath>
-
-#include <cstring>
 #include "atom.h"
 #include "comm.h"
-#include "error.h"
-#include "force.h"
-#include "memory.h"
-#include "neighbor.h"
-#include "neigh_list.h"
-#include "math_const.h"
 #include "domain.h"
-#ifdef XNDAF_DEBUG
-#include <chrono>
+#include "error.h"
+#include "group.h"
+#include "math_const.h"
+#include "memory.h"
+#include "update.h"
+#include "modify.h"
+#include "neighbor.h"
+#include "neigh_request.h"
+#include "neigh_list.h"
+#include "force.h"
+#include "pair.h"
 #include <iostream>
-#endif
 
+#include <cmath>
+#include <cstring>
+
+#include "omp_compat.h"
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
-
-PairXNDAF::PairXNDAF(LAMMPS *lmp) : Pair(lmp),
-nbin_r(0), nbin_q(0), npair(0)
+// usage: compute <id> all sqxf <sqex_file> <typs> <neutron_bs> nbin_r r_max nbin_q qmax factorx factorn output_interval sq_out gr_out[group is ignored and set to all
+ComputeXNDAFRMDFORCE::ComputeXNDAFRMDFORCE(LAMMPS *lmp, int narg, char **arg) :
+  Compute(lmp, narg, arg), ztype(nullptr), sinqr(nullptr), sff(nullptr),
+   ggr(nullptr), cnt(nullptr), cnt_all(nullptr), typ2pair(nullptr), gnm(nullptr), neu_b(nullptr), sffn(nullptr), ncall(0)
 {
-  single_enable = 0;
-  restartinfo = 0;
-  one_coeff = 1;
-  manybody_flag = 1;
-  no_virial_fdotr_compute=1;
-  // unit_convert_flag = utils::get_supported_conversions(utils::ENERGY);
-}
 
-/* ----------------------------------------------------------------------
-   check if allocated, since class can be destructed when incomplete
-------------------------------------------------------------------------- */
-
-PairXNDAF::~PairXNDAF()
-{
-  if (allocated) {
-    memory->destroy(ssq);
-    memory->destroy(iiq);
-    memory->destroy(sinqr);
-    memory->destroy(sff);
-    memory->destroy(ggr);
-    memory->destroy(cnt);
-    memory->destroy(cnt_all);
-    memory->destroy(typ2pair);
-    memory->destroy(gnm);
-    memory->destroy(frc);
-    memory->destroy(frc_allocated);
-    memory->destroy(neu_b);
-    memory->destroy(sffn);
-    memory->destroy(sqex);
-    memory->destroy(wt);
-    memory->destroy(kq);
-    memory->destroy(mq);
-    memory->destroy(wk);
-    memory->destroy(setflag);
-    memory->destroy(cutsq);
-    memory->destroy(sff_w);
-    memory->destroy(sffn_w);
-    memory->destroy(dsicqr_dr_div_r);
-    memory->destroy(force_qspace);
-  delete[] ztype;
-  delete[] sqout;
-  delete[] grout;
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void PairXNDAF::compute(int eflag, int vflag)
-{
-  // if(comm->me==0) utils::logmesg(lmp,"call compute\n");
-  int i, j, ii, jj, inum, jnum, itype, jtype;
-  double xtmp, ytmp, ztmp, delx, dely, delz,fpair;
-  double rsq, factor_lj;
-  int *ilist, *jlist, *numneigh, **firstneigh, tbi;
-
-  ev_init(eflag, vflag);
-  // calc sq and generate force table;
-  if(ncall%update_interval==0){
-    compute_sq();
-    generateForceTable();
-  }
-  if(comm->me==0 && ncall%output_interval==0){
-    // utils::logmesg(lmp,"output sq and gr\n");
-    FILE *fp=fopen(sqout,"w");
-    for(i=0;i<nbin_q;i++)
-    {
-      fprintf(fp,"%lf %lf %lf %lf %lf",ssq[i][0],ssq[i][1],ssq[i][2],iiq[i][0],iiq[i][1]);
-      for(j=0;j<npair;j++){
-        fprintf(fp," %lf",ssq[i][3+j]);
-      }
-      fprintf(fp,"\n");
-    }
-    fclose(fp);
-    fp=fopen(grout,"w");
-    for(i=0;i<nbin_r;i++)
-    {
-      fprintf(fp,"%lf",(i+.5)*ddr);
-      for(j=0;j<npair;j++){
-        fprintf(fp," %lf",ggr[i][j]);
-      }
-      fprintf(fp,"\n");
-    }
-    fclose(fp);
-  }
-
-  ncall++;
-
-
-  double **x = atom->x;
-  double **f = atom->f;
-  int *type = atom->type;
-  int nlocal = atom->nlocal;
-  double *special_lj = force->special_lj;
-  int newton_pair = force->newton_pair;
-
-  inum = list->inum;
-  ilist = list->ilist;
-  numneigh = list->numneigh;
-  firstneigh = list->firstneigh;
-  const double cutsqall = force_cutoff_sq;// cutsq[0][0];
-
-  // loop over neighbors of my atoms
-  #ifdef XNDAF_DEBUG
-  auto t1=std::chrono::high_resolution_clock::now();
-  #endif
-  for (ii = 0; ii < inum; ii++) {
-    i = ilist[ii];
-    xtmp = x[i][0];
-    ytmp = x[i][1];
-    ztmp = x[i][2];
-    itype = type[i];
-    jlist = firstneigh[i];
-    jnum = numneigh[i];
-    // utils::logmesg(lmp,"x{} {} {} {}\n",i,x[i][0],x[i][1],x[i][2]);
-    // utils::logmesg(lmp,"f{} {} {} {}\n",i,f[i][0],f[i][1],f[i][2]);
-    for (jj = 0; jj < jnum; jj++) {
-      j = jlist[jj];
-      factor_lj = special_lj[sbmask(j)];
-      j &= NEIGHMASK;
-
-      delx = xtmp - x[j][0];
-      dely = ytmp - x[j][1];
-      delz = ztmp - x[j][2];
-      rsq = delx * delx + dely * dely + delz * delz;
-      jtype = type[j];
-
-      if (rsq < cutsqall) {
-        rsq=sqrt(rsq);
-        tbi=(int)(rsq/ddr);
-        if(tbi>=nbin_r) continue;
-        // fpair = frc[tbi][typ2pair[itype][jtype]]*factor_lj;
-        fpair = getForce(tbi,typ2pair[itype][jtype])*factor_lj;
-
-        f[i][0] += delx * fpair;
-        f[i][1] += dely * fpair;
-        f[i][2] += delz * fpair;
-        if (newton_pair || j < nlocal) {
-          f[j][0] -= delx * fpair;
-          f[j][1] -= dely * fpair;
-          f[j][2] -= delz * fpair;
-        }
-
-        // if (eflag) {
-        //   evdwl = r6inv * (lj3[itype][jtype] * r6inv - lj4[itype][jtype]) - offset[itype][jtype];
-        //   evdwl *= factor_lj;
-        // }
-
-        // if (evflag) ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
-      }
-    }
-  }
-  #ifdef XNDAF_DEBUG
-  auto t2=std::chrono::high_resolution_clock::now();
-  auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
-  std::cout << "total compute loop " << time_span.count() << " s\n";
-  #endif
-  // if (vflag_fdotr) virial_fdotr_compute();
-  eng_vdwl=localerg;
-}
-
-/* ----------------------------------------------------------------------
-   global settings
-------------------------------------------------------------------------- */
-
-void PairXNDAF::settings(int narg, char **/*arg*/)
-{
-  // if(comm->me==0) utils::logmesg(lmp,"call settings\n");
-  if (narg != 0) error->all(FLERR,"Illegal pair_style command");
-}
-
-/* ----------------------------------------------------------------------
-   set coeffs for one or more type pairs
-------------------------------------------------------------------------- */
-// pair_coeff * * <sqex_file> <typs> <neutron_bs> nbin_r r_max nbin_q qmax force_cutoff factorx factorn update_interval output_interval sq_out gr_out
-void PairXNDAF::coeff(int narg, char **arg)
-{
-  // if(comm->me==0) utils::logmesg(lmp,"call coeff\n");
-  if (allocated) error->all(FLERR,"Cannot call a second pair_coeff");;
-
-  ntypes = atom->ntypes;
+  int ntypes = atom->ntypes;
   int dimension = domain->dimension;
   int triclinic = domain->triclinic;
 
   // Checking errors
   if (dimension == 2)
      error->all(FLERR,"Compute SQXF does not work with 2d structures");
-  if (narg != 14+ntypes*2)
+  if (narg != 13+ntypes*2)
      error->all(FLERR,"Illegal Compute SQXF Command");
   if (triclinic == 1)
      error->all(FLERR,"Compute SQXF does not work with triclinic structures");
 
+  array_flag = 1;
+  extarray = 0;
+
   // Define atom types for atomic scattering factor coefficients
-  int iarg = 3;
+  int iarg = 4;
   ztype = new int[ntypes];
   for (int i = 0; i < ntypes; i++) {
     ztype[i] = XRDmaxType + 1;
@@ -251,6 +81,7 @@ void PairXNDAF::coeff(int narg, char **arg)
         error->all(FLERR,"Compute SQXF: Invalid ASF atom type");
     iarg++;
   }
+
   memory->create(neu_b,ntypes,"rdf:neu_b");
   for (int i = 0; i < ntypes; i++) {
     neu_b[i]=utils::numeric(FLERR,arg[iarg++],false,lmp);
@@ -258,25 +89,23 @@ void PairXNDAF::coeff(int narg, char **arg)
   }
   nbin_r = utils::inumeric(FLERR,arg[iarg],false,lmp);
   r_max = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+  r_max_sq = r_max*r_max;
   nbin_q = utils::inumeric(FLERR,arg[iarg+2],false,lmp);
   q_max = utils::numeric(FLERR,arg[iarg+3],false,lmp);
-  ddr=r_max/nbin_r;
-  force_cutoff = utils::numeric(FLERR,arg[iarg+4],false,lmp);
-  force_cutoff_sq=force_cutoff*force_cutoff;
-  if (r_max<force_cutoff) error->all(FLERR,"Compute SQXF: r_max < force_cutoff");
-  factorx = utils::numeric(FLERR,arg[iarg+5],false,lmp);
-  factorn = utils::numeric(FLERR,arg[iarg+6],false,lmp);
-  update_interval=utils::inumeric(FLERR,arg[iarg+7],false,lmp);
-  output_interval=utils::inumeric(FLERR,arg[iarg+8],false,lmp);
+  ddr = r_max/nbin_r;
+  factorx = utils::numeric(FLERR,arg[iarg+4],false,lmp);
+  factorn = utils::numeric(FLERR,arg[iarg+5],false,lmp);
+  output_interval = utils::inumeric(FLERR,arg[iarg+6],false,lmp);
 
-  sqout=new char [ 1+strlen(arg[iarg+9])];
-  sprintf(sqout,"%s",arg[iarg+9]);
-  grout=new char [ 1+strlen(arg[iarg+10])];
-  sprintf(grout,"%s",arg[iarg+10]);
+  sqout=new char [ 1+strlen(arg[iarg+7])];
+  sprintf(sqout,"%s",arg[iarg+7]);
+  grout=new char [ 1+strlen(arg[iarg+8])];
+  sprintf(grout,"%s",arg[iarg+8]);
 
-  npair=ntypes*(ntypes+1)/2;
+  size_array_cols = npair = ntypes*(ntypes+1)/2;
+  size_array_rows = nbin_r;
+
   memory->create(ssq,nbin_q,3+npair,"rmdf:ssq");
-  memory->create(iiq,nbin_q,2,"rmdf:iiq");
   memory->create(sinqr,nbin_q,nbin_r,"rmdf:sinqr");
   memory->create(dsicqr_dr_div_r,nbin_q,nbin_r,"rmdf:dsinqr_dr");
   memory->create(force_qspace,npair,nbin_q,"rmdf:force_qspace");
@@ -287,7 +116,7 @@ void PairXNDAF::coeff(int narg, char **arg)
   memory->create(cnt_all,nbin_r,npair,"rmdf:cnt_all");
   memory->create(typ2pair,ntypes+1,ntypes+1,"rmdf:typ2pair");
   memory->create(gnm,nbin_r,npair,"rmdf:gnm");
-  memory->create(frc,nbin_r,npair,"rmdf:frc");
+  memory->create(array,nbin_r,npair,"rmdf:array");
   memory->create(frc_allocated,nbin_r,npair,"rmdf:frc_allocated");
   memory->create(sffn,npair,"rmdf:sffn");
   memory->create(sffn_w,npair,"rmdf:sffn_w");
@@ -296,53 +125,80 @@ void PairXNDAF::coeff(int narg, char **arg)
   memory->create(mq,nbin_q,2,"rmdf:mq");
   memory->create(wk,nbin_q,2,"rmdf:wk");
   memory->create(sqex,nbin_q,2,"rmdf:sqex");
-  memory->create(setflag,ntypes+1,ntypes+1,"pair:setflag"); // must be set to avoid segmentation error
-  memory->create(cutsq,ntypes+1,ntypes+1,"pair:cutsq");     // must be set to avoid segmentation error
 
+  array[1][0]=r_max;
   iarg=0;
   for (int i = 1; i <= ntypes; i++)
     for (int j = i; j <= ntypes; j++)
       typ2pair[i][j]=typ2pair[j][i] = iarg++;
-  read_file(arg[2]);
+  read_file(arg[3]);
   init_norm();
-  allocated=1;
-  for (int i = 0; i <= ntypes; i++) //cutsq[0][0] will be used. 
-    for (int j = 0; j <= ntypes; j++) 
-    {
-      cutsq[i][j]=r_max*r_max;
-      setflag[i][j] = 1;
-    }
 }
 
-/* ----------------------------------------------------------------------
-   init specific to this pair style
-------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------- */
 
-void PairXNDAF::init_style()
+ComputeXNDAFRMDFORCE::~ComputeXNDAFRMDFORCE()
 {
-  // if(comm->me==0) utils::logmesg(lmp,"call init_style\n");
-  // if (atom->tag_enable == 0)
-    // error->all(FLERR,"Pair style XNDAF requires atom IDs");
-  ncall=0;
+  memory->destroy(array);
+  memory->destroy(sinqr);
+  memory->destroy(sff);
+  memory->destroy(ggr);
+  memory->destroy(cnt);
+  memory->destroy(cnt_all);
+  memory->destroy(typ2pair);
+  memory->destroy(gnm);
+  memory->destroy(neu_b);
+  memory->destroy(sffn);
+  delete[] ztype;
+}
+
+void ComputeXNDAFRMDFORCE::init()
+{
+  double skin = neighbor->skin,mycutneigh;
+  mycutneigh = r_max + skin;
+  double cutghost;            // as computed by Neighbor and Comm
+  if (force->pair)
+    cutghost = MAX(force->pair->cutforce+skin,comm->cutghostuser);
+  else
+    cutghost = comm->cutghostuser;
+  if (mycutneigh > cutghost)
+    error->all(FLERR,"Compute rdf cutoff exceeds ghost atom range - "
+               "use comm_modify cutoff command");
+  if (force->pair && mycutneigh < force->pair->cutforce + skin)
+    if (comm->me == 0)
+      error->warning(FLERR,"Compute rdf cutoff less than neighbor cutoff - "
+                     "forcing a needless neighbor list build");
+
+  init_norm();
+
+  // need an occasional half neighbor list
+  // if user specified, request a cutoff = cutoff_user + skin
+  // skin is included b/c Neighbor uses this value similar
+  //   to its cutneighmax = force cutoff + skin
+  // also, this NeighList may be used by this compute for multiple steps
+  //   (until next reneighbor), so it needs to contain atoms further
+  //   than cutoff_user apart, just like a normal neighbor list does
+
   int irequest = neighbor->request(this,instance_me);
-  // neighbor->requests[irequest]->half = 0;
-  // neighbor->requests[irequest]->full = 1;
+  neighbor->requests[irequest]->pair = 0;
+  neighbor->requests[irequest]->compute = 1;
+  neighbor->requests[irequest]->occasional = 1;
+  neighbor->requests[irequest]->cut = 1;
+  neighbor->requests[irequest]->cutoff = mycutneigh;
+  neighbor->requests[irequest]->half = 1;
+  neighbor->requests[irequest]->full = 0;
 }
 
-/* ----------------------------------------------------------------------
-   init for one type pair i,j and corresponding j,i
-------------------------------------------------------------------------- */
-
-double PairXNDAF::init_one(int i, int j)
+void ComputeXNDAFRMDFORCE::init_list(int /*id*/, NeighList *ptr)
 {
-  // if(comm->me==0) utils::logmesg(lmp,"call init_one\n");
-  if (!allocated) error->all(FLERR,"All pair coeffs are not set");
-  return r_max;
+  // std::cout<<"compute list is"<<ptr<<std::endl;
+  // std::cout<<"modify is"<<modify<<std::endl;
+  list = ptr;
 }
 
 /* ---------------------------------------------------------------------- */
 // file format : q sqx wtx kx mx sqn wtn kn mn
-void PairXNDAF::read_file(char *file)
+void ComputeXNDAFRMDFORCE::read_file(char *file)
 {
   // if(comm->me==0) utils::logmesg(lmp,"call read_file\n");
   // open file on proc 0
@@ -363,53 +219,29 @@ void PairXNDAF::read_file(char *file)
       sumx+=wt[i][0];
       sumn+=wt[i][1];
     }
-    for(int i=0;i<nbin_q;i++){
-      wt[i][0]/=sumx;
-      wt[i][1]/=sumn;
-      wk[i][0]=wt[i][0]*kq[i][0]*factorx*2;
-      wk[i][1]=wt[i][1]*kq[i][1]*factorn*2;
-    }
     fclose(fp);
+    for(int i=0;i<nbin_q;i++){
+      wt[i][0]=wt[i][0]/sumx*factorx*2;
+      wt[i][1]=wt[i][1]/sumn*factorn*2;
+      // iiq[i][0]=iiq[i][1]=0;
+    }
     utils::logmesg(lmp,"Exp S(Q) final data {} {}\n",sqex[nbin_q-1][0],sqex[nbin_q-1][1]);
-    // transfer exp sq to iq and normalize
-    sumx=sumn=0;
-    for(int i=0;i<nbin_q;i++){
-      sumx+=(sqex[i][0]=sqex[i][0]*kq[i][0]+mq[i][0])*wt[i][0];
-      sumn+=(sqex[i][1]=sqex[i][1]*kq[i][1]+mq[i][1])*wt[i][1];
-    }
-    for(int i=0;i<nbin_q;i++){
-      sqex[i][0]-=sumx;
-      sqex[i][1]-=sumn;
-    }
-    sumx=sumn=0;
-    for(int i=0;i<nbin_q;i++){
-      sumx+=sqex[i][0]*sqex[i][0]*wt[i][0];
-      sumn+=sqex[i][1]*sqex[i][1]*wt[i][1];
-    }
-    sumx=sqrt(sumx);
-    sumn=sqrt(sumn);
-    for(int i=0;i<nbin_q;i++){
-      sqex[i][0]/=sumx;
-      sqex[i][1]/=sumn;
-    }
 
   }
 
   MPI_Bcast(sqex[0], 2*nbin_q, MPI_DOUBLE, 0, world);
   MPI_Bcast(wt[0], 2*nbin_q, MPI_DOUBLE, 0, world);
-  MPI_Bcast(kq[0], 2*nbin_q, MPI_DOUBLE, 0, world);
-  MPI_Bcast(mq[0], 2*nbin_q, MPI_DOUBLE, 0, world);
-  MPI_Bcast(wk[0], 2*nbin_q, MPI_DOUBLE, 0, world);
 }
 
-/* ---------------------------------------------------------------------- */
 
-void PairXNDAF::init_norm()
+/* ---------------------------------------------------------------------- */
+void ComputeXNDAFRMDFORCE::init_norm()
 {
   // if(comm->me==0) utils::logmesg(lmp,"call init_norm\n");
   // count atoms of each type that are also in group
 
   const int nlocal = atom->nlocal;
+  const int ntypes = atom->ntypes;
   // const int * const mask = atom->mask;
   const int * const type = atom->type;
   int *typecount = new int[ntypes+1];
@@ -418,7 +250,7 @@ void PairXNDAF::init_norm()
   for (int ii = 1; ii <= ntypes; ii++) typecount[ii] = 0;
   for (int ii = 0; ii < nlocal; ii++)
     // if (mask[i] & groupbit) 
-      typecount[type[ii]]++;
+      ++typecount[type[ii]];
 
   natoms=0;
   MPI_Allreduce(typecount,scratch,ntypes+1,MPI_INT,MPI_SUM,world);
@@ -447,7 +279,7 @@ void PairXNDAF::init_norm()
     for (int ii = 0; ii < ntypes; ii++) {
       f[ii] = ASFXRD[ztype[ii]][8];
       for (int C = 0; C < 8 ; C+=2) {
-        f[ii] += ASFXRD[ztype[ii]][C] * exp(-1 * ASFXRD[ztype[ii]][C+1] * qo4p * qo4p );
+        f[ii] += ASFXRD[ztype[ii]][C] * exp(-ASFXRD[ztype[ii]][C+1] * qo4p * qo4p );
       }
     }
     pair_id=0;
@@ -491,7 +323,7 @@ void PairXNDAF::init_norm()
   //norm form gr
   // qo4p=(domain->xprd)*(domain->yprd)*(domain->zprd);
   for(int rk=0;rk<nbin_r;rk++){
-    rj=(pow(r_max*(rk+1)/nbin_r,3)-pow(r_max*(rk)/nbin_r,3))/3;
+    rj=(1 + 3*rk * (1 + rk))/3.0 * std::pow(r_max/nbin_r,3);  //(pow(r_max*(rk+1)/nbin_r,3)-pow(r_max*(rk)/nbin_r,3))/3;
     pair_id=0;
     for (int ii = 0; ii < ntypes; ii++) {
       for (int jj = ii; jj < ntypes; jj++) {
@@ -507,7 +339,8 @@ void PairXNDAF::init_norm()
   if(comm->me==0) utils::logmesg(lmp,"norm generated\n");
 }
 
-void PairXNDAF::compute_sq()
+
+void ComputeXNDAFRMDFORCE::compute_sq()
 {
   #ifdef XNDAF_DEBUG
   auto t1=std::chrono::high_resolution_clock::now();
@@ -518,7 +351,7 @@ void PairXNDAF::compute_sq()
   double xtmp,ytmp,ztmp,delx,dely,delz,r;
   
   //calc gr
-  // neighbor->build_one(list);
+  neighbor->build_one(list);
 
   inum = list->inum;
   ilist = list->ilist;
@@ -542,7 +375,6 @@ void PairXNDAF::compute_sq()
   double **x = atom->x;
   int *type = atom->type;
   int *mask = atom->mask;
-  const double cutsqall = cutsq[0][0];
 
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
@@ -566,7 +398,7 @@ void PairXNDAF::compute_sq()
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       r = delx*delx + dely*dely + delz*delz;
-      if (r < cutsqall)
+      if (r < r_max_sq)
       {
         r=sqrt(r);
         ibin = static_cast<int> (r/ddr);
@@ -616,88 +448,69 @@ void PairXNDAF::compute_sq()
   #endif
 }
 
-// lazy evaluation of force table.
-double PairXNDAF::getForce(int idx_r, int idx_pair)
-{
-  #ifdef XNDAF_INSTANT_FORCE
-  return frc[idx_r][idx_pair];
-  #else
-  // if(std::isinf(frc[idx_r][idx_pair]))
-  if(frc_allocated[idx_r][idx_pair]) return frc[idx_r][idx_pair];
-
-  double ffc=0;
-  for(int qk=0;qk<nbin_q;qk++){
-    ffc+=force_qspace[idx_pair][qk]*dsicqr_dr_div_r[qk][idx_r];
-  }
-  frc[idx_r][idx_pair]=ffc;
-  frc_allocated[idx_r][idx_pair]=1;
-  return ffc;
-  // return ffc;
-  #endif
-}
-
-void PairXNDAF::generateForceTable()
+void ComputeXNDAFRMDFORCE::generateForceTable()
 {  
   #ifdef XNDAF_DEBUG
   auto t1=std::chrono::high_resolution_clock::now();
   #endif
 
   for(int i=0;i<npair;i++){
-    for(int rk=0;rk<nbin_r;rk++){
-      // frc[rk][i]=INFINITY;
-#ifndef XNDAF_INSTANT_FORCE
-      frc_allocated[rk][i]=0;
-#else
-      frc[rk][i]=0;
-#endif
+    for(int rk=2;rk<nbin_r;rk++){
+      array[rk][i]=0;
     }
   }
-  // sq to iq and norm
-  double nrsqrx=0,nrsqrn=0,normx=0,normn=0;
-  // remove bias
-  for(int i=0;i<nbin_q;i++){
-    normx+=(iiq[i][0]=ssq[i][1]*kq[i][0]+mq[i][0])*wt[i][0];
-    normn+=(iiq[i][1]=ssq[i][2]*kq[i][1]+mq[i][1])*wt[i][1];
-  }
-  for(int i=0;i<nbin_q;i++){
-    iiq[i][0]-=normx ;
-    iiq[i][1]-=normn;
-  }
-  //calc var
-  for(int i=0;i<nbin_q;i++){
-    nrsqrx+=iiq[i][0]*iiq[i][0]*wt[i][0];
-    nrsqrn+=iiq[i][1]*iiq[i][1]*wt[i][1];
-  }
-  normx=sqrt(nrsqrx);
-  normn=sqrt(nrsqrn);
-  //inner prod
-  double crsx=0,crsn=0;
-  for(int i=0;i<nbin_q;i++){
-    crsx+=iiq[i][0]*sqex[i][0]*wt[i][0];
-    crsn+=iiq[i][1]*sqex[i][1]*wt[i][1];
-  }
-  crsx/=nrsqrx;
-  crsn/=nrsqrn;  
 
+  double localerg=0;
   double diffx,diffn;
   for(int qk=0;qk<nbin_q;qk++){
-    diffx=(sqex[qk][0]-iiq[qk][0]*crsx)*wk[qk][0]/normx;
-    diffn=(sqex[qk][1]-iiq[qk][1]*crsn)*wk[qk][1]/normn;
+    // note: ssq[][0] is Q
+    diffx=(sqex[qk][0]-ssq[qk][1]);
+    diffn=(sqex[qk][1]-ssq[qk][2]);
+    localerg+=(diffx*diffx)*wt[qk][0]+(diffn*diffn)*wt[qk][1];
+    diffx*=wt[qk][0];
+    diffn*=wt[qk][1];
     for(int i=0;i<npair;i++){
       force_qspace[i][qk]=diffx*sff_w[qk][i]+diffn*sffn_w[i];
-      #ifdef XNDAF_INSTANT_FORCE
-      for(int rk=0;rk<nbin_r;rk++){
-        frc[rk][i]+=force_qspace[i][qk]*dsicqr_dr_div_r[qk][rk];
-        // frc_allocated[rk][i]=1;
+      for(int rk=2;rk<nbin_r;rk++){
+        array[rk][i]+=force_qspace[i][qk]*dsicqr_dr_div_r[qk][rk];
       }
-      #endif
     }
   }
-  localerg=((1-crsx*normx)*factorx+(1-crsn*normn)*factorn)*atom->nlocal;
-
+  **array=localerg*(.5*atom->nlocal);
+  
   #ifdef XNDAF_DEBUG
   auto t2=std::chrono::high_resolution_clock::now();
   auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
   std::cout << "force table " << time_span.count() << " s\n";
   #endif
+}
+
+void ComputeXNDAFRMDFORCE::compute_array()
+{
+  compute_sq();
+  generateForceTable();
+
+    if(comm->me==0 && (ncall++)%output_interval==0){
+    // utils::logmesg(lmp,"output sq and gr\n");
+    FILE *fp=fopen(sqout,"w");
+    for(int i=0;i<nbin_q;i++)
+    {
+      fprintf(fp,"%lf %lf %lf",ssq[i][0],ssq[i][1],ssq[i][2]);
+      for(int j=0;j<npair;j++){
+        fprintf(fp," %lf",ssq[i][3+j]);
+      }
+      fprintf(fp,"\n");
+    }
+    fclose(fp);
+    fp=fopen(grout,"w");
+    for(int i=0;i<nbin_r;i++)
+    {
+      fprintf(fp,"%lf",(i+.5)*ddr);
+      for(int j=0;j<npair;j++){
+        fprintf(fp," %lf",ggr[i][j]);
+      }
+      fprintf(fp,"\n");
+    }
+    fclose(fp);
+  }
 }

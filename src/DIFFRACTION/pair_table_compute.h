@@ -13,21 +13,24 @@
 
 #ifdef PAIR_CLASS
 // clang-format off
-PairStyle(fmirl,PairFMIRL);
+PairStyle(table/compute,PairTBCOMP);
 // clang-format on
 #else
 
-#ifndef LMP_PAIR_FMIRL_H
-#define LMP_PAIR_FMIRL_H
+#ifndef LMP_PAIR_TABLE_COMPUTE_H
+#define LMP_PAIR_TABLE_COMPUTE_H
+
+// #define XNDAF_DEBUG
+#define XNDAF_INSTANT_FORCE
 
 #include "pair.h"
 
 namespace LAMMPS_NS {
 
-class PairFMIRL : public Pair {
+class PairTBCOMP : public Pair {
  public:
-  PairFMIRL(class LAMMPS *);
-  virtual ~PairFMIRL();
+  PairTBCOMP(class LAMMPS *);
+  virtual ~PairTBCOMP();
   virtual void compute(int, int);
   virtual void settings(int, char **);
   virtual void coeff(int, char **);
@@ -36,30 +39,14 @@ class PairFMIRL : public Pair {
 
   protected:
 
-  void read_file(char *,char*);
-  int npair,ntypes;
-  int nfea;
-  double r_max,ddr,*rr;
-  int nbin_r;
-  double **u0,**f0_dr,**uf,**ff_dr;
-  double ***ufi,***ffi_dr;
-  double *fea,*f_coef,*l2,*fea_true;
-  double *grad,*mon1; 
-  double lr;
-  int update_interval,output_interval;
-  bigint ncall;
-  int **typ2pair;
-  double momentum,co_momentum;
-  int **cnt,**cnt_all;
-  int use_base;
-  double *base;
+  Compute *force_compute;
   double force_cutoff,force_cutoff_sq;
-
-  char *grout,*feout,*binout;
-  bigint natoms;
-  void init_norm();
-  virtual void compute_gr();
-  virtual void generateForceTable();
+  int update_interval,output_interval; // interval for updating sq and output
+  bigint ncall;
+  int **typ2pair;       //typ to pair
+  double **frc;                   // force divded by r
+  int nbin_r;                // number of bins
+  double ddr,r_max;
 };
 
 }    // namespace LAMMPS_NS
