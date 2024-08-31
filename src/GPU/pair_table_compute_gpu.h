@@ -13,29 +13,27 @@
 
 #ifdef PAIR_CLASS
 // clang-format off
-PairStyle(xndaf/gpu,PairXNDAFGPU);
+PairStyle(table/compute/gpu,PairTBCOMPGPU);
 // clang-format on
 #else
 
-#ifndef LMP_PAIR_XNDAFGPU_H
-#define LMP_PAIR_XNDAFGPU_H
+#ifndef LMP_PAIR_TABLE_COMPUTE_GPU_H
+#define LMP_PAIR_TABLE_COMPUTE_GPU_H
 
-#include "pair_xndaf_omp.h"
+#include "pair_table_compute.h"
 
 namespace LAMMPS_NS {
 
-class PairXNDAFGPU : public PairXNDAFOMP { // use omp version of compute sq to accelerate.
+class PairTBCOMPGPU : public PairTBCOMP {
  public:
-  PairXNDAFGPU(class LAMMPS *);
-  ~PairXNDAFGPU();
+  PairTBCOMPGPU(class LAMMPS *);
+  ~PairTBCOMPGPU();
   void cpu_compute(int, int, int, int, int *, int *, int **);
   virtual void compute(int, int) override;
-  virtual void compute_sq() override;
   void init_style() override;
   enum { GPU_FORCE, GPU_NEIGH, GPU_HYB_NEIGH };
 
  private:
-  void evalsq_gpu(int ifrom, int ito, ThrData *const thr, int **counter);
   int gpu_mode;
   double cpu_time;
 };

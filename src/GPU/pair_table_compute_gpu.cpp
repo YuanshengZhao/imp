@@ -16,7 +16,7 @@
    Contributing author:  Yuansheng Zhao
 ------------------------------------------------------------------------- */
 
-#include "pair_xndaf_gpu.h"
+#include "pair_table_compute_gpu.h"
 
 #include "atom.h"
 #include "domain.h"
@@ -28,19 +28,11 @@
 #include "neigh_request.h"
 #include "neighbor.h"
 #include "suffix.h"
+#include "compute.h"
 #include "comm.h"
 
 #include <cmath>
 
-#ifdef XNDAF_DEBUG
-#include <chrono>
-#include <iostream>
-#endif
-#ifdef XNDAF_OMP_DEBUG
-#include <iostream>
-#endif
-
-#include "omp_compat.h"
 using namespace LAMMPS_NS;
 
 int xndaf_gpu_init(const int ntypes, const int ntable, double host_cutsq,
@@ -62,11 +54,11 @@ void xndaf_gpu_compute(const int ago, const int inum_full, const int nall,
                        int **firstneigh, const bool eflag, const bool vflag,
                        const bool eatom, const bool vatom, int &host_start,
                        const double cpu_time, bool &success);
-double xndaf_gpu_bytes();                                               
+double xndaf_gpu_bytes();                                            
 
 /* ---------------------------------------------------------------------- */
 
-PairXNDAFGPU::PairXNDAFGPU(LAMMPS *lmp) : PairXNDAFOMP(lmp), gpu_mode(GPU_FORCE)
+PairTBCOMPGPU::PairTBCOMPGPU(LAMMPS *lmp) : PairTBCOMP(lmp), gpu_mode(GPU_FORCE)
 {
   respa_enable = 0;
   reinitflag = 0;
@@ -75,13 +67,13 @@ PairXNDAFGPU::PairXNDAFGPU(LAMMPS *lmp) : PairXNDAFOMP(lmp), gpu_mode(GPU_FORCE)
   GPU_EXTRA::gpu_ready(lmp->modify, lmp->error);
 }
 
-PairXNDAFGPU::~PairXNDAFGPU()
+PairTBCOMPGPU::~PairTBCOMPGPU()
 {
   xndaf_gpu_clear();
 }
 
 
-void PairXNDAFGPU::compute(int eflag, int vflag)
+void PairTBCOMPGPU::compute(int eflag, int vflag)
 {
   int i,j;
   ev_init(eflag, vflag);
@@ -94,40 +86,11 @@ void PairXNDAFGPU::compute(int eflag, int vflag)
 
   // calc sq and generate force table;
   if(ncall%update_interval==0){
-    compute_sq();
-    generateForceTable();
-    #ifndef XNDAF_INSTANT_FORCE
-    error->all(FLERR,"XNDAF_INSTANT_FORCE is not defined! Recompile!");
-    #else
+    force_compute -> compute_array();
     xndaf_gpu_sendTable(frc);
-    #endif
-  }
-  if(comm->me==0 && ncall%output_interval==0){
-    // utils::logmesg(lmp,"output sq and gr\n");
-    FILE *fp=fopen(sqout,"w");
-    for(i=0;i<nbin_q;i++)
-    {
-      fprintf(fp,"%lf %lf %lf %lf %lf",ssq[i][0],ssq[i][1],ssq[i][2],iiq[i][0],iiq[i][1]);
-      for(j=0;j<npair;j++){
-        fprintf(fp," %lf",ssq[i][3+j]);
-      }
-      fprintf(fp,"\n");
-    }
-    fclose(fp);
-    fp=fopen(grout,"w");
-    for(i=0;i<nbin_r;i++)
-    {
-      fprintf(fp,"%lf",(i+.5)*ddr);
-      for(j=0;j<npair;j++){
-        fprintf(fp," %lf",ggr[i][j]);
-      }
-      fprintf(fp,"\n");
-    }
-    fclose(fp);
   }
 
   ncall++;
-
 
   if (gpu_mode != GPU_FORCE) {
     double sublo[3],subhi[3];
@@ -166,10 +129,12 @@ void PairXNDAFGPU::compute(int eflag, int vflag)
     cpu_time = platform::walltime() - cpu_time;
   }
 
-  eng_vdwl=localerg;
+  if (eflag) {
+    eng_vdwl=**frc;
+  }
 }
 
-void PairXNDAFGPU::init_style()
+void PairTBCOMPGPU::init_style()
 {
   ncall=0;
   // Repeat cutsq calculation because done after call to init_style
@@ -194,148 +159,12 @@ void PairXNDAFGPU::init_style()
   else error->all(FLERR,"gpu_mode != GPU_FORCE is not supported yet!");
 }
 
-void PairXNDAFGPU::compute_sq()
-{
-  #ifdef XNDAF_DEBUG
-  auto t1=std::chrono::high_resolution_clock::now();
-  #endif
-  // if(comm->me==0) utils::logmesg(lmp,"call compute_sq\n");
-  int src,i,j;
-  const int nthreads = comm->nthreads;
-  const int inum = list->inum;
-
-  // zero the histogram counts
-  for (i = 0; i < npair; i++)
-    for (j = 0; j < nbin_r; j++)
-      cnt[j][i] = 0;
-
-
-#if defined(_OPENMP)
-#pragma omp parallel LMP_DEFAULT_NONE
-#endif
-  {
-    int ifrom, ito, tid;
-
-    loop_setup_thr(ifrom, ito, tid, inum, nthreads);
-    ThrData *thr = fix->get_thr(tid);
-  #ifdef XNDAF_OMP_DEBUG
-  std::cout << tid << " " << ifrom << " "<<ito <<"\n";
-  #endif
-    evalsq_gpu(ifrom, ito, thr, cnt_omp_private[tid]);
-
-#if defined(_OPENMP)
-#pragma omp critical 
-#endif
-    {
-      for (i = 0; i < npair; i++)
-        for (j = 0; j < nbin_r; j++)
-        {
-          cnt[j][i] += cnt_omp_private[tid][j][i];
-        }
-    }
-
-  } // end of omp parallel region  
-
-  // sum histograms across procs
-
-  MPI_Allreduce(cnt[0],cnt_all[0],npair*nbin_r,MPI_INT,MPI_SUM,world);
-
-  // convert counts to g(r) and coord(r) and copy into output array
-  // vfrac = fraction of volume in shell m
-  // npairs = number of pairs, corrected for duplicates
-  // duplicates = pairs in which both atoms are the same
-#if defined(_OPENMP)
-#pragma omp parallel for
-#endif
-  for (int gk=0;gk<npair;gk++){
-    for(int rk=0;rk<nbin_r;rk++){
-      ggr[rk][gk]=cnt_all[rk][gk]*gnm[rk][gk];
-      // array[rk][1+gk]=ggr[rk][gk];
-    }
-  }
-
-  // gr -> sq
-  const double vinv=natoms/((domain->xprd)*(domain->yprd)*(domain->zprd));
-#if defined(_OPENMP)
-#pragma omp parallel for private(src)
-#endif
-  for(int qk=0;qk<nbin_q;qk++){
-    ssq[qk][1]=ssq[qk][2]=0;
-    for (int gk=0;gk<npair;gk++){
-      src=gk+3;
-      ssq[qk][src]=0;
-      for(int rk=0;rk<nbin_r;rk++){
-        ssq[qk][src]+=(ggr[rk][gk]-vinv)*sinqr[qk][rk];
-      }
-      ssq[qk][1]+=ssq[qk][src]*sff[qk][gk];
-      ssq[qk][2]+=ssq[qk][src]*sffn[gk];
-    }
-  }
-  #ifdef XNDAF_DEBUG
-  auto t2=std::chrono::high_resolution_clock::now();
-  auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
-  std::cout << "sq " << time_span.count() << " s\n";
-  #endif
-}
-
-void PairXNDAFGPU::evalsq_gpu(int iifrom, int iito, ThrData * const thr, int **counter)
-{
-  const dbl3_t * _noalias const x = (dbl3_t *) atom->x[0];
-  const int * _noalias const type = atom->type;
-  const int * _noalias const ilist = list->ilist;
-  const int * _noalias const numneigh = list->numneigh;
-  const int * const * const firstneigh = list->firstneigh;
-
-  double xtmp,ytmp,ztmp,delx,dely,delz;
-  double rsq;
-
-  const int nlocal = atom->nlocal;
-  int j,jj,jnum,jtype;
-  int ibin;
-
-  for (int i = 0; i < npair; i++)
-    for (j = 0; j < nbin_r; j++)
-      counter[j][i] = 0;
-      
-  const double cutsqall = cutsq[0][0];
-  for (int ii = iifrom; ii < iito; ++ii) {
-    const int i = ilist[ii];
-    const int itype = type[i];
-    const int    * _noalias const jlist = firstneigh[i];
-
-    xtmp = x[i].x;
-    ytmp = x[i].y;
-    ztmp = x[i].z;
-    jnum = numneigh[i];
-
-    for (jj = 0; jj < jnum; jj++) {
-      j = jlist[jj];
-      j &= NEIGHMASK;
-      jtype = type[j];
-
-      delx = xtmp - x[j].x;
-      dely = ytmp - x[j].y;
-      delz = ztmp - x[j].z;
-      rsq = delx*delx + dely*dely + delz*delz;
-
-      if (rsq < cutsqall) {
-        rsq=sqrt(rsq);
-        ibin=(int)(rsq/ddr);
-        if (ibin < nbin_r) {
-          counter[ibin][typ2pair[itype][jtype]]++;
-        }
-      }
-    }
-  }
-}
-
-void PairXNDAFGPU::cpu_compute(int start, int inum, int eflag, int /* vflag */,
+void PairTBCOMPGPU::cpu_compute(int start, int inum, int eflag, int /* vflag */,
                                int *ilist, int *numneigh, int **firstneigh) {
   int i,j,ii,jj,jnum,itype,jtype;
-  double xtmp,ytmp,ztmp,delx,dely,delz,fpair;
+  double xtmp,ytmp,ztmp,delx,dely,delz,fpair,evdwl;
   double rsq,factor_lj;
-  int *jlist,tbi;
-
+  int *jlist,tbi,ptemp;
 
   double **x = atom->x;
   double **f = atom->f;
@@ -343,7 +172,7 @@ void PairXNDAFGPU::cpu_compute(int start, int inum, int eflag, int /* vflag */,
   double *special_lj = force->special_lj;
 
   // loop over neighbors of my atoms
-  const double cutsqall = force_cutoff_sq;//cutsq[0][0];
+
   for (ii = start; ii < inum; ii++) {
     i = ilist[ii];
     xtmp = x[i][0];
@@ -364,16 +193,17 @@ void PairXNDAFGPU::cpu_compute(int start, int inum, int eflag, int /* vflag */,
       rsq = delx*delx + dely*dely + delz*delz;
       jtype = type[j];
 
-      if (rsq < cutsqall) {
+      if (rsq < force_cutoff_sq) {
         rsq=sqrt(rsq);
         tbi=(int)(rsq/ddr);
         if(tbi>=nbin_r) continue;
-        // fpair = frc[tbi][typ2pair[itype][jtype]]*factor_lj;
-        fpair = getForce(tbi,typ2pair[itype][jtype])*factor_lj;
+        fpair = frc[tbi][typ2pair[itype][jtype]]*factor_lj;
 
         f[i][0] += delx * fpair;
         f[i][1] += dely * fpair;
         f[i][2] += delz * fpair;
+
+        // if (evflag) ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
       }
     }
   }

@@ -1,3 +1,69 @@
+This package contains the code for performing data assimilated MD 
+simulation [1] or using reinforcement learning to fit experimental 
+data [2]. The added code is mainly contained in src/DIFFRACTION 
+directory. Go to release for detailed usage examples.
+
+[1] Y. Z., R. S., and S. T., Journal of Non-Crystalline Solids, 
+    vol. 600, p. 122028, 2023.
+[2] Y. Z., The Journal of Chemical Physics, vol. 155, no. 23, 
+    p. 234501, 2021.
+
+---------------------
+
+Data assimilation:
+- Use `xndaf' pair style, usually combined with hybrid/overlay. 
+
+- `omp' and `gpu' versions are also available
+
+- Coefficients should be set by
+    pair_coeff * * sqex_file atom_types neutron_bs nbin_r r_max \
+        nbin_q qmax force_cutoff_r factorx factorn update_interval \
+        output_interval sq_out_file gr_out_file
+    
+    Last 3 variables are mainly for debugging purposes.
+    The older version does not take the force_cutoff_r argument (set 
+    to r_max automatically).
+    
+- Experimental file sqex_file should have for following format:
+    q sq_x weight_x k_x m_x sq_neutron weight_neutron k_n m_n
+    
+    q must be compatible with nbin_q and qmax in pair_coeff:
+            q[i] = (i + .05) * qmax / nbin_q
+    Here, the structure factor sq is related to the intensity iq by
+            iq = k * sq + m.
+
+- The penalty function is added to total energy, but the resulting 
+    pressure is not. Therefore, never use NPT thermostat with xndaf. 
+
+---------------------
+
+Reinforcement learning:
+- Use `fmirl' pair style, may combine with hybrid/overlay.
+
+- Coefficients
+    pair_coeff * * data_file init_file force_cutoff base \
+        learning_rate momentum update_interval output_interval \
+        fe_out gr_out
+    
+    if base==1, g(r)-1 is used to compute features instead of g(r).
+
+- Format for binary `data_file':
+    nfea, r_max, nbin_r, n_type, u0_0_0...u0_[npair-1]_[nbin_r-1], \
+    uf__...uf__, f0__...f0__, ff__...ff__,fea_true_...,l2__
+    
+    Total potential is then
+            u_{ij} = u0_{ij} + \sum_k^{nfea} uk_{ij}.
+    f0 and ff is the corresponding force divided by r.
+    fea_true is the true features:
+            Fk = \sum_{ij} uf_{ij}(r_{ij}).
+    
+    `init_file' is a binary file containing initial weights.
+    
+
+**********************************************************************
+======================================================================
+
+
 This is the LAMMPS software package.
 
 LAMMPS stands for Large-scale Atomic/Molecular Massively Parallel

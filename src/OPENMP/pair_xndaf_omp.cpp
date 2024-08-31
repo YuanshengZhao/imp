@@ -28,6 +28,7 @@
 #include "neigh_list.h"
 #include "suffix.h"
 #include "memory.h"
+#include "domain.h"
 #ifdef XNDAF_DEBUG
 #include <chrono>
 #include <iostream>
@@ -132,7 +133,7 @@ void PairXNDAFOMP::eval(int iifrom, int iito, ThrData * const thr)
 
   // loop over neighbors of my atoms
 
-  const double cutsqall = cutsq[0][0];
+  const double cutsqall = force_cutoff_sq;// cutsq[0][0];
   for (int ii = iifrom; ii < iito; ++ii) {
     const int i = ilist[ii];
     const int itype = type[i];
@@ -252,6 +253,7 @@ void PairXNDAFOMP::compute_sq()
   }
 
   // gr -> sq
+  const double vinv=natoms/((domain->xprd)*(domain->yprd)*(domain->zprd));
 #if defined(_OPENMP)
 #pragma omp parallel for private(src)
 #endif
@@ -261,7 +263,7 @@ void PairXNDAFOMP::compute_sq()
       src=gk+3;
       ssq[qk][src]=0;
       for(int rk=0;rk<nbin_r;rk++){
-        ssq[qk][src]+=(ggr[rk][gk]-1)*sinqr[qk][rk];
+        ssq[qk][src]+=(ggr[rk][gk]-vinv)*sinqr[qk][rk];
       }
       ssq[qk][1]+=ssq[qk][src]*sff[qk][gk];
       ssq[qk][2]+=ssq[qk][src]*sffn[gk];
@@ -374,24 +376,28 @@ void PairXNDAFOMP::generateForceTable()
   crsn/=nrsqrn;  
 
   double diffx,diffn;
-#ifndef XNDAF_INSTANT_FORCE
 #if defined(_OPENMP)
 #pragma omp parallel for private(diffx,diffn)
-#endif
 #endif
   for(int qk=0;qk<nbin_q;qk++){
     diffx=(sqex[qk][0]-iiq[qk][0]*crsx)*wk[qk][0]/normx;
     diffn=(sqex[qk][1]-iiq[qk][1]*crsn)*wk[qk][1]/normn;
     for(int i=0;i<npair;i++){
       force_qspace[i][qk]=diffx*sff_w[qk][i]+diffn*sffn_w[i];
-      #ifdef XNDAF_INSTANT_FORCE
-      for(int rk=0;rk<nbin_r;rk++){
-        frc[rk][i]+=force_qspace[i][qk]*dsicqr_dr_div_r[qk][rk];
-        // frc_allocated[rk][i]=1;
-      }
-      #endif
     }
   }
+  #ifdef XNDAF_INSTANT_FORCE
+  #if defined(_OPENMP)
+  #pragma omp parallel for
+  #endif
+  for(int i=0;i<npair;i++){
+    for(int rk=0;rk<nbin_r;rk++){
+      for(int qk=0;qk<nbin_q;qk++){
+        frc[rk][i]+=force_qspace[i][qk]*dsicqr_dr_div_r[qk][rk];
+      }
+    }
+  }
+  #endif
   localerg=((1-crsx*normx)*factorx+(1-crsn*normn)*factorn)*atom->nlocal;
 
   #ifdef XNDAF_DEBUG

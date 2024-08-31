@@ -1,9 +1,9 @@
 // **************************************************************************
-//                                   xndaf.cu
+//                                   fmirl.cu
 //                             -------------------
 //                           Trung Dac Nguyen (ORNL)
 //
-//  Device code for acceleration of the xndaf pair style
+//  Device code for acceleration of the fmirl pair style
 //
 // __________________________________________________________________________
 //    This file is part of the LAMMPS Accelerator Library (LAMMPS_AL)
@@ -24,12 +24,15 @@ _texture_2d( pos_tex,int4);
 #define pos_tex x_
 #endif
 
-__kernel void k_xndaf(const __global numtyp4 *restrict x_,
+__kernel void k_fmirl(const __global numtyp4 *restrict x_,
                     const numtyp cutsq,
                     const numtyp drinv,
                     const int n_table,
                     const __global int *restrict tabindex,
-                    const __global numtyp *restrict frc_tb,
+                    const __global numtyp *restrict u0_tb,
+                    const __global numtyp *restrict f0_tb,
+                    const __global numtyp *restrict uf_tb,
+                    const __global numtyp *restrict ff_tb,
                     const int lj_types,
                     const __global numtyp *restrict sp_lj_in,
                     const __global int *dev_nbor,
@@ -88,11 +91,24 @@ __kernel void k_xndaf(const __global numtyp4 *restrict x_,
         rsq=ucl_sqrt(rsq);
         int tbi=(int)(rsq*drinv);
         numtyp force = (numtyp)0;
-        if(tbi<n_table) {
-          force=frc_tb[tbi+tabindex[mtype]]*factor_lj;
+        if(tbi<n_table){
+          int tbm=tbi+tabindex[mtype];
+          force=f0_tb[tbm]*factor_lj+ff_tb[tbm];
           f.x+=delx*force;
           f.y+=dely*force;
           f.z+=delz*force;
+
+          if (EVFLAG && eflag) {
+            energy+=u0_tb[tbm]*factor_lj+uf_tb[tbm];
+          }
+          if (EVFLAG && vflag) {
+            virial[0] += delx*delx*force;
+            virial[1] += dely*dely*force;
+            virial[2] += delz*delz*force;
+            virial[3] += delx*dely*force;
+            virial[4] += delx*delz*force;
+            virial[5] += dely*delz*force;
+          }
         }
       }
 
@@ -102,12 +118,15 @@ __kernel void k_xndaf(const __global numtyp4 *restrict x_,
                 ans,engv);
 }
 
-__kernel void k_xndaf_fast(const __global numtyp4 *restrict x_,
+__kernel void k_fmirl_fast(const __global numtyp4 *restrict x_,
                          const numtyp cutsq,
                          const numtyp drinv,
                          const int n_table,
                          const __global int *restrict tabindex,
-                         const __global numtyp *restrict frc_tb,
+                         const __global numtyp *restrict u0_tb,
+                         const __global numtyp *restrict f0_tb,
+                         const __global numtyp *restrict uf_tb,
+                         const __global numtyp *restrict ff_tb,
                          const __global numtyp *restrict sp_lj_in,
                          const __global int *dev_nbor,
                          const __global int *dev_packed,
@@ -165,11 +184,24 @@ __kernel void k_xndaf_fast(const __global numtyp4 *restrict x_,
         rsq=ucl_sqrt(rsq);
         int tbi=(int)(rsq*drinv);
         numtyp force = (numtyp)0;
-        if(tbi<n_table) {
-          force=frc_tb[tbi+tabindex[mtype]]*factor_lj;
+        if(tbi<n_table){
+          int tbm=tbi+tabindex[mtype];
+          force=f0_tb[tbm]*factor_lj+ff_tb[tbm];
           f.x+=delx*force;
           f.y+=dely*force;
           f.z+=delz*force;
+
+          if (EVFLAG && eflag) {
+            energy+=u0_tb[tbm]*factor_lj+uf_tb[tbm];
+          }
+          if (EVFLAG && vflag) {
+            virial[0] += delx*delx*force;
+            virial[1] += dely*dely*force;
+            virial[2] += delz*delz*force;
+            virial[3] += delx*dely*force;
+            virial[4] += delx*delz*force;
+            virial[5] += dely*delz*force;
+          }
         }
       }
 

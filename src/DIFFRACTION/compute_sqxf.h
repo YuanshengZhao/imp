@@ -43,6 +43,7 @@ class ComputeSQXF : public Compute {
   double **sinqr;  // r,q,fourierMX
   double *neu_b,*sffn;         // neutron scattering length
   double **sff,**gnm;            // weight of each partial sq, normalization of gr
+  bigint natoms;
 
   class NeighList *list;    // half neighbor list
   void init_norm();
